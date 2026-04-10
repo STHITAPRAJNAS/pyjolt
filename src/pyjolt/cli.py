@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Any
 
 from .chainr import Chainr
 from .exceptions import PyJoltError
@@ -60,6 +59,7 @@ def main() -> None:
         spec_data = json.load(args.spec)
 
         # Decide whether to use Chainr (if list) or Shift (if dict)
+        transform: Chainr | Shift
         if isinstance(spec_data, list):
             transform = Chainr.from_spec(spec_data)
         elif isinstance(spec_data, dict):
