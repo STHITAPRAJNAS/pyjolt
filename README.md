@@ -497,15 +497,30 @@ chain = Chainr([Shift({"b": "b", "a": "a"}), Sort()])
 chain.apply({"b": 2, "a": 1})  # → {"a": 1, "b": 2}  (sorted)
 ```
 
-## Development
+## Contributing
+
+Contributions are welcome — bug reports, documentation improvements, new
+features, and spec-compatibility fixes all help.
 
 ```bash
 git clone https://github.com/sthitaprajnas/pyjolt.git
 cd pyjolt
 pip install -e ".[dev]"
-pytest
+pytest                        # run test suite
+ruff check src/pyjolt         # lint
+mypy src/pyjolt               # type-check
 ```
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.  For
+security issues, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Copyright 2024 Sthitaprajna Sahoo and contributors.
+
+Licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE) for
+the full text.
+
+You are free to use, modify, and distribute this software under the terms of
+the Apache 2.0 license.  Contributions submitted to the project are also
+licensed under Apache 2.0.
