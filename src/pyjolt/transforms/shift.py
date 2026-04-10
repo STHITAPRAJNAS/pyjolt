@@ -335,10 +335,24 @@ def _resolve_path(
     segments: list[_Segment],
     ctx: list[_Ctx],
     current_val: Any,
-) -> tuple[list[str], bool]:
-    """Resolve a list of segments to concrete string keys + append flag."""
-    keys: list[str] = []
-    append = False
+) -> tuple[list[str], list[str], bool]:
+    """Resolve path segments into (pre_array_keys, post_array_keys, append).
+
+    When ``[]`` appears in the **middle** of a path (e.g. ``items[].sku``):
+    - ``pre_array_keys`` holds the path up to the array key: ``["items"]``
+    - ``post_array_keys`` holds the remainder:              ``["sku"]``
+    - ``append`` is ``True``
+
+    When ``[]`` appears at the **end** (e.g. ``values[]``):
+    - ``pre_array_keys`` = ``["values"]``, ``post_array_keys`` = ``[]``
+    - ``append`` = ``True``
+
+    When there is no ``[]``:
+    - ``pre_array_keys`` = full path, ``post_array_keys`` = ``[]``
+    - ``append`` = ``False``
+    """
+    all_keys: list[str] = []
+    slot_after: int | None = None  # index in all_keys AFTER which [] appeared
 
     for seg in segments:
         parts: list[str] = []
@@ -356,11 +370,17 @@ def _resolve_path(
             elif isinstance(part, _ArrayAppend):
                 seg_append = True
         if parts:
-            keys.append("".join(parts))
-        if seg_append:
-            append = True
+            all_keys.append("".join(parts))
+        if seg_append and slot_after is None:
+            # Record the position where [] appeared
+            slot_after = len(all_keys)
 
-    return keys, append
+    if slot_after is None:
+        return all_keys, [], False
+
+    pre = all_keys[:slot_after]
+    post = all_keys[slot_after:]
+    return pre, post, True
 
 
 # ---------------------------------------------------------------------------
@@ -368,16 +388,76 @@ def _resolve_path(
 # ---------------------------------------------------------------------------
 
 
-def _write(output: dict[str, Any], keys: list[str], value: Any, append: bool) -> None:
-    """Write *value* into *output* following *keys*, creating intermediate dicts."""
-    if not keys:
+def _write(
+    output: dict[str, Any],
+    pre_keys: list[str],
+    post_keys: list[str],
+    value: Any,
+    append: bool,
+    slot_registry: dict[tuple[int, tuple[str, ...]], dict[str, Any]],
+    ctx: list[_Ctx],
+) -> None:
+    """Write *value* into *output*.
+
+    Parameters
+    ----------
+    pre_keys:
+        Path segments before any ``[]`` marker.
+    post_keys:
+        Path segments after the ``[]`` marker (empty when ``[]`` is at end
+        or when there is no ``[]``).
+    value:
+        Value to write.
+    append:
+        ``True`` when ``[]`` was present in the path.
+    slot_registry:
+        Shared dict mapping ``(id(array_list), iteration_key_tuple)`` to the
+        dict slot already created for the current wildcard iteration.  Ensures
+        multiple fields from the same iteration land in the same list element.
+    ctx:
+        Current match context — used to derive the iteration identity key.
+    """
+    if not pre_keys and not post_keys:
         return
 
-    node: Any = output
-    for key in keys[:-1]:
+    if not append:
+        # ── Plain write (no array involved) ──────────────────────────────
+        node: Any = output
+        for key in pre_keys[:-1]:
+            if isinstance(node, dict):
+                if not isinstance(node.get(key), dict):
+                    node[key] = {}
+                node = node[key]
+            elif isinstance(node, list):
+                try:
+                    idx = int(key)
+                except ValueError:
+                    return
+                while len(node) <= idx:
+                    node.append(None)
+                if not isinstance(node[idx], dict):
+                    node[idx] = {}
+                node = node[idx]
+            else:
+                return
+        last = pre_keys[-1]
         if isinstance(node, dict):
-            existing = node.get(key)
-            if not isinstance(existing, dict):
+            existing = node.get(last)
+            if existing is not None:
+                if isinstance(existing, list):
+                    existing.append(value)
+                else:
+                    node[last] = [existing, value]
+            else:
+                node[last] = value
+        return
+
+    # ── Array write ([] present) ──────────────────────────────────────────
+    # Navigate to the node that holds the array
+    node = output
+    for key in pre_keys[:-1]:
+        if isinstance(node, dict):
+            if not isinstance(node.get(key), (dict, list)):
                 node[key] = {}
             node = node[key]
         elif isinstance(node, list):
@@ -391,28 +471,53 @@ def _write(output: dict[str, Any], keys: list[str], value: Any, append: bool) ->
                 node[idx] = {}
             node = node[idx]
         else:
-            return  # cannot descend into a scalar
+            return
 
-    last = keys[-1]
+    array_key = pre_keys[-1] if pre_keys else None
+
+    if array_key is None:
+        return
+
     if isinstance(node, dict):
-        if append:
-            existing = node.get(last)
-            if existing is None:
-                node[last] = [value]
-            elif isinstance(existing, list):
-                existing.append(value)
-            else:
-                node[last] = [existing, value]
+        if not isinstance(node.get(array_key), list):
+            node[array_key] = []
+        arr = node[array_key]
+    else:
+        return
+
+    if not post_keys:
+        # [] at end — simple append of the value
+        arr.append(value)
+        return
+
+    # [] in the middle — need a shared dict slot for the current iteration.
+    # Use ctx[:-1] so that different leaf fields from the same wildcard iteration
+    # (e.g. "sku", "qty", "price" from items[0]) all map to the same slot.
+    iter_key: tuple[str, ...] = tuple(c.key for c in ctx[:-1])
+    reg_key = (id(arr), iter_key)
+
+    if reg_key not in slot_registry:
+        slot: dict[str, Any] = {}
+        arr.append(slot)
+        slot_registry[reg_key] = slot
+
+    slot = slot_registry[reg_key]
+
+    # Write into the slot using post_keys
+    inner: Any = slot
+    for key in post_keys[:-1]:
+        if not isinstance(inner.get(key), dict):
+            inner[key] = {}
+        inner = inner[key]
+    inner_last = post_keys[-1]
+    existing_inner = inner.get(inner_last)
+    if existing_inner is not None:
+        if isinstance(existing_inner, list):
+            existing_inner.append(value)
         else:
-            existing = node.get(last)
-            if existing is not None and existing is not node.get(last, _SENTINEL):
-                # Key already set — collect into list (JOLT default behaviour)
-                if isinstance(existing, list):
-                    existing.append(value)
-                else:
-                    node[last] = [existing, value]
-            else:
-                node[last] = value
+            inner[inner_last] = [existing_inner, value]
+    else:
+        inner[inner_last] = value
 
 
 _SENTINEL = object()
@@ -428,22 +533,23 @@ def _apply(
     spec: _SpecLeaf | _SpecNode,
     ctx: list[_Ctx],
     output: dict[str, Any],
+    slot_registry: dict[tuple[int, tuple[str, ...]], dict[str, Any]],
 ) -> None:
     if isinstance(spec, _SpecLeaf):
         for path_segments in spec.paths:
-            keys, append = _resolve_path(path_segments, ctx, input_val)
-            if keys:
-                _write(output, keys, input_val, append)
+            pre, post, append = _resolve_path(path_segments, ctx, input_val)
+            if pre:
+                _write(output, pre, post, input_val, append, slot_registry, ctx)
         return
 
     # _SpecNode — handle self-reference first
     if spec.at_self is not None:
-        _apply(input_val, spec.at_self, ctx, output)
+        _apply(input_val, spec.at_self, ctx, output, slot_registry)
 
     if isinstance(input_val, dict):
-        _apply_dict(input_val, spec, ctx, output)
+        _apply_dict(input_val, spec, ctx, output, slot_registry)
     elif isinstance(input_val, list):
-        _apply_list(input_val, spec, ctx, output)
+        _apply_list(input_val, spec, ctx, output, slot_registry)
     # Scalar with non-leaf spec: nothing to descend into
 
 
@@ -452,20 +558,21 @@ def _apply_dict(
     spec: _SpecNode,
     ctx: list[_Ctx],
     output: dict[str, Any],
+    slot_registry: dict[tuple[int, tuple[str, ...]], dict[str, Any]],
 ) -> None:
     for key, val in d.items():
         if key in spec.literals:
             # Literal match is exclusive — wildcards do not fire for this key
             child = spec.literals[key]
             new_ctx = ctx + [_Ctx(key, (key,), val)]
-            _apply(val, child, new_ctx, output)
+            _apply(val, child, new_ctx, output, slot_registry)
         else:
             for pattern, _raw, child in spec.wildcards:
                 m = pattern.match(key)
                 if m:
                     groups = (key,) + m.groups()
                     new_ctx = ctx + [_Ctx(key, groups, val)]
-                    _apply(val, child, new_ctx, output)
+                    _apply(val, child, new_ctx, output, slot_registry)
 
 
 def _apply_list(
@@ -473,6 +580,7 @@ def _apply_list(
     spec: _SpecNode,
     ctx: list[_Ctx],
     output: dict[str, Any],
+    slot_registry: dict[tuple[int, tuple[str, ...]], dict[str, Any]],
 ) -> None:
     for i, val in enumerate(lst):
         str_i = str(i)
@@ -480,14 +588,14 @@ def _apply_list(
         if str_i in spec.literals:
             child = spec.literals[str_i]
             new_ctx = ctx + [_Ctx(str_i, (str_i,), val)]
-            _apply(val, child, new_ctx, output)
+            _apply(val, child, new_ctx, output, slot_registry)
 
         for pattern, _raw, child in spec.wildcards:
             m = pattern.match(str_i)
             if m:
                 groups = (str_i,) + m.groups()
                 new_ctx = ctx + [_Ctx(str_i, groups, val)]
-                _apply(val, child, new_ctx, output)
+                _apply(val, child, new_ctx, output, slot_registry)
 
 
 # ---------------------------------------------------------------------------
@@ -523,5 +631,6 @@ class Shift(Transform):
 
     def apply(self, input_data: Any) -> Any:
         output: dict[str, Any] = {}
-        _apply(input_data, self._root, [], output)
+        slot_registry: dict[tuple[int, tuple[str, ...]], dict[str, Any]] = {}
+        _apply(input_data, self._root, [], output, slot_registry)
         return output

@@ -26,6 +26,8 @@ pip install pyjolt
 
 ## Quick Start
 
+The canonical JOLT example — re-shape a nested rating object:
+
 ```python
 from pyjolt import Chainr
 
@@ -70,6 +72,186 @@ result = Chainr.from_spec(spec).apply(input_data)
 # }
 ```
 
+## Real-World Examples
+
+### E-commerce order normalisation
+
+Transform a raw checkout payload into an internal order schema — renaming
+fields, typing prices, and stripping sensitive data:
+
+```python
+from pyjolt import Chainr
+
+spec = [
+    {
+        "operation": "shift",
+        "spec": {
+            "orderId": "id",
+            "customer": {
+                "firstName": "customer.first",
+                "lastName":  "customer.last",
+                "emailAddress": "customer.email",
+            },
+            "lineItems": {
+                "*": {
+                    "sku":       "items[].sku",
+                    "qty":       "items[].quantity",
+                    "unitPrice": "items[].price",
+                }
+            },
+            "shippingMethod": "shipping.method",
+        },
+    },
+    {
+        # Convert price strings to floats inside each item
+        "operation": "modify-overwrite-beta",
+        "spec": {"items": {"*": {"price": "=toDouble"}}},
+    },
+    {
+        "operation": "default",
+        "spec": {"shipping": {"method": "standard"}},
+    },
+    {
+        "operation": "remove",
+        "spec": {"couponCode": ""},
+    },
+]
+
+raw_order = {
+    "orderId": "ORD-9921",
+    "customer": {
+        "firstName": "Jane", "lastName": "Doe",
+        "emailAddress": "jane.doe@example.com",
+    },
+    "lineItems": [
+        {"sku": "ABC-1", "qty": 2, "unitPrice": "19.99"},
+        {"sku": "XYZ-7", "qty": 1, "unitPrice": "5.49"},
+    ],
+    "shippingMethod": "express",
+    "couponCode": None,
+}
+
+result = Chainr.from_spec(spec).apply(raw_order)
+# {
+#   "id": "ORD-9921",
+#   "customer": {"first": "Jane", "last": "Doe", "email": "jane.doe@example.com"},
+#   "items": [
+#     {"sku": "ABC-1", "quantity": 2, "price": 19.99},
+#     {"sku": "XYZ-7", "quantity": 1, "price":  5.49}
+#   ],
+#   "shipping": {"method": "express"}
+# }
+```
+
+> **Note** — the `items[].field` syntax builds an array of objects where each
+> wildcard iteration (`*` over `lineItems`) contributes one element.  Multiple
+> fields from the same iteration (`sku`, `qty`, `price`) all land in the same
+> array slot automatically.
+
+---
+
+### API response normalisation
+
+Flatten a paginated search response, rename fields, and default missing values:
+
+```python
+spec = [
+    {
+        "operation": "shift",
+        "spec": {
+            "total_count": "meta.total",
+            "items": {
+                "*": {
+                    "id":               "repos[].id",
+                    "full_name":        "repos[].name",
+                    "stargazers_count": "repos[].stars",
+                    "language":         "repos[].language",
+                    "private":          "repos[].private",
+                }
+            },
+        },
+    },
+    {
+        "operation": "default",
+        "spec": {"repos": {"*": {"language": "unknown"}}},
+    },
+    {"operation": "sort"},
+]
+```
+
+---
+
+### User profile flattening + PII scrub
+
+Flatten a nested CMS user object into a flat CRM record and strip PII before
+export:
+
+```python
+spec = [
+    {
+        "operation": "shift",
+        "spec": {
+            "userId": "crm.id",
+            "profile": {
+                "displayName": "crm.name",
+                "address": {
+                    "city":    "crm.city",
+                    "country": "crm.country",
+                },
+            },
+            "account": {
+                "plan":      "crm.plan",
+                "createdAt": "crm.joinDate",
+                "tags":      "crm.tags",
+            },
+            # profile.email, profile.phone, internal.* are intentionally
+            # omitted from the spec and therefore dropped from the output
+        },
+    },
+    {"operation": "default",         "spec": {"crm": {"plan": "free", "tags": []}}},
+    {"operation": "modify-overwrite-beta", "spec": {"crm": {"plan": "=toUpperCase"}}},
+    {"operation": "cardinality",     "spec": {"crm": {"tags": "MANY"}}},
+]
+```
+
+---
+
+### IoT sensor normalisation
+
+Three device types emit subtly different payloads — one pipeline normalises
+them into a uniform time-series schema:
+
+```python
+spec = [
+    {
+        "operation": "shift",
+        "spec": {
+            "device_id": "deviceId",
+            "type":      "sensorType",
+            "ts":        "timestamp",
+            "reading": {
+                "celsius": "value",   # temperature devices
+                "percent": "value",   # humidity devices
+                "hpa":     "value",   # pressure devices
+                "unit":    "unit",
+            },
+            "battery_pct": "batteryPercent",
+        },
+    },
+    {
+        "operation": "modify-overwrite-beta",
+        "spec": {
+            "value":          "=toDouble",
+            "batteryPercent": "=toInteger",
+        },
+    },
+    {
+        "operation": "default",
+        "spec": {"batteryPercent": -1},   # sentinel for older firmware
+    },
+]
+```
+
 ## Transform Reference
 
 ### Shift
@@ -88,7 +270,7 @@ s.apply({"user": {"name": "Alice", "age": 30}})
 
 | Token | Meaning |
 |-------|---------|
-| `*` | Match any key (wildcards may be combined: `prefix_*_suffix`) |
+| `*` | Match any key (combinable: `prefix_*_suffix`) |
 | `a\|b` | Match key `a` OR `b` |
 | `@` | Self-reference — use the current input node directly |
 
@@ -97,10 +279,10 @@ s.apply({"user": {"name": "Alice", "age": 30}})
 | Token | Meaning |
 |-------|---------|
 | `literal` | Literal key name |
-| `&` or `&N` | Key matched N levels up (`&0` = current, `&1` = parent, …) |
+| `&` / `&N` | Key matched N levels up (`&0` = current, `&1` = parent, …) |
 | `&(N,M)` | M-th wildcard capture group at N levels up |
 | `@(N,path)` | Value found at N levels up following dot-separated path |
-| `[]` suffix | Append to array instead of overwrite |
+| `[]` suffix | Array-append: append value, or share a slot across fields |
 
 **Wildcard back-references:**
 
@@ -110,7 +292,16 @@ s = Shift({"*-*": "out.&(0,1).&(0,2)"})
 s.apply({"foo-bar": 42})  # → {"out": {"foo": {"bar": 42}}}
 ```
 
-**Array output:**
+**Array of objects:**
+
+```python
+# Each "*" iteration creates one element; multiple fields share the same slot
+s = Shift({"items": {"*": {"id": "out[].id", "name": "out[].name"}}})
+s.apply({"items": [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]})
+# → {"out": [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]}
+```
+
+**Array flatten (append scalars):**
 
 ```python
 s = Shift({"a": "vals[]", "b": "vals[]"})
@@ -134,6 +325,15 @@ from pyjolt.transforms import Default
 d = Default({"status": "unknown", "meta": {"version": 1}})
 d.apply({"name": "test"})
 # → {"name": "test", "status": "unknown", "meta": {"version": 1}}
+```
+
+Apply a default to every element of an array:
+
+```python
+Default({"items": {"*": {"active": True}}}).apply(
+    {"items": [{"name": "x"}, {"name": "y", "active": False}]}
+)
+# → {"items": [{"name": "x", "active": True}, {"name": "y", "active": False}]}
 ```
 
 ### Remove
@@ -196,6 +396,15 @@ m = ModifyDefault({"count": 0, "active": True})
 m.apply({"count": 5})  # → {"count": 5, "active": True}
 ```
 
+Apply a function to every element of an array:
+
+```python
+ModifyOverwrite({"prices": {"*": {"amount": "=toDouble"}}}).apply(
+    {"prices": [{"amount": "9.99"}, {"amount": "4.49"}]}
+)
+# → {"prices": [{"amount": 9.99}, {"amount": 4.49}]}
+```
+
 **Built-in functions:**
 
 | Function | Description |
@@ -234,7 +443,7 @@ chain.apply({"score": "3.14"})  # → {"score": 3.14}
 chain.apply({})                  # → {"score": 0.0}
 ```
 
-You can also compose transform instances directly:
+Compose transform instances directly:
 
 ```python
 from pyjolt import Chainr

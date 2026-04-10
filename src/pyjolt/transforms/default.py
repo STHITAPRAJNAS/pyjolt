@@ -41,6 +41,14 @@ def _apply_defaults(data: Any, spec: Any) -> Any:
                 result[key] = _apply_defaults({}, spec_val)
             elif isinstance(result[key], dict):
                 result[key] = _apply_defaults(result[key], spec_val)
+            elif isinstance(result[key], list):
+                # When the spec_val has a wildcard, apply its sub-spec to each
+                # list element (e.g. {"repos": {"*": {"language": "unknown"}}}).
+                wildcard = spec_val.get("*")
+                if isinstance(wildcard, dict):
+                    result[key] = [_apply_defaults(item, wildcard) for item in result[key]]
+                else:
+                    result[key] = [_apply_defaults(item, spec_val) for item in result[key]]
         else:
             if key not in result or result[key] is None:
                 result[key] = copy.deepcopy(spec_val)

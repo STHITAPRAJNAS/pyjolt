@@ -315,8 +315,12 @@ def _apply_modify(data: Any, spec: Any, overwrite: bool) -> Any:
             if key == "*":
                 continue
             if isinstance(spec_val, dict):
-                if key in result and isinstance(result[key], dict):
-                    result[key] = _apply_modify(result[key], spec_val, overwrite)
+                if key in result:
+                    if isinstance(result[key], dict):
+                        result[key] = _apply_modify(result[key], spec_val, overwrite)
+                    elif isinstance(result[key], list):
+                        # Apply spec to each element of the list
+                        result[key] = _apply_modify(result[key], spec_val, overwrite)
                 elif key not in result and not overwrite:
                     pass  # default mode — skip absent nested keys
             else:
@@ -328,14 +332,23 @@ def _apply_modify(data: Any, spec: Any, overwrite: bool) -> Any:
                 if key in spec:
                     continue
                 current = result[key]
-                if isinstance(wildcard, dict) and isinstance(current, dict):
-                    result[key] = _apply_modify(current, wildcard, overwrite)
+                if isinstance(wildcard, dict):
+                    if isinstance(current, (dict, list)):
+                        result[key] = _apply_modify(current, wildcard, overwrite)
+                    # wildcard dict-spec does not apply to scalar values — skip
                 else:
                     result[key] = _apply_spec_value(current, wildcard, result, overwrite, key)
 
         return result
 
     if isinstance(data, list):
+        # When the spec has a wildcard dict-spec ("*": {...}), apply that
+        # sub-spec to each list element directly.  This covers the common
+        # pattern {"items": {"*": {"price": "=toDouble"}}} where items is a
+        # list of dicts and the wildcard targets each element's fields.
+        wildcard = spec.get("*") if isinstance(spec, dict) else None
+        if isinstance(wildcard, dict):
+            return [_apply_modify(item, wildcard, overwrite) for item in data]
         return [_apply_modify(item, spec, overwrite) for item in data]
 
     return data
