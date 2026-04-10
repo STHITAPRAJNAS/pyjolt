@@ -32,6 +32,8 @@ Supported operation names
 * ``"cardinality"``            — :class:`~pyjolt.transforms.Cardinality`
 * ``"modify-overwrite-beta"``  — :class:`~pyjolt.transforms.ModifyOverwrite`
 * ``"modify-default-beta"``    — :class:`~pyjolt.transforms.ModifyDefault`
+* ``"modify-overwrite"``       — :class:`~pyjolt.transforms.ModifyOverwrite`
+* ``"modify-default"``         — :class:`~pyjolt.transforms.ModifyDefault`
 """
 
 from __future__ import annotations
@@ -56,6 +58,8 @@ _OPERATIONS: dict[str, Callable[[Any], Transform]] = {
     "cardinality": Cardinality,
     "modify-overwrite-beta": ModifyOverwrite,
     "modify-default-beta": ModifyDefault,
+    "modify-overwrite": ModifyOverwrite,
+    "modify-default": ModifyDefault,
 }
 
 
