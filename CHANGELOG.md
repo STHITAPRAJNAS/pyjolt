@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-04-10
+
+### Fixed
+
+- **Shift Transform**: Improved JOLT spec compliance and stability in complex
+  scenarios (multiple output paths, shared slot coordination).
+- **Code Quality**: Fixed 60+ linting violations (Ruff) and resolved all Mypy
+  type errors in core transforms.
+- **Tests**: Cleaned up unused imports and standardized formatting across the
+  entire test suite.
+
+### Added
+
+- **Complex Scenarios**: Added dedicated test suite for complex JOLT-like
+  transformations (list-to-object mapping, deep nested array append).
+
 ## [1.0.0] — 2024-04-10
 
 ### Added
@@ -57,4 +73,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 193 tests across all transforms and real-world integration scenarios
 
+[1.1.0]: https://github.com/sthitaprajnas/pyjolt/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/sthitaprajnas/pyjolt/releases/tag/v1.0.0
