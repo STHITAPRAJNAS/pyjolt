@@ -13,8 +13,8 @@ description = "High-performance, pure-Python implementation of the JOLT JSON-to-
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-authors = [{ name = "PyJolt Contributors" }]
-maintainers = [{ name = "PyJolt Contributors" }]
+authors = [{ name = "Sthitaprajna Sahoo", email = "papu.sahoo@gmail.com" }]
+maintainers = [{ name = "Sthitaprajna Sahoo", email = "papu.sahoo@gmail.com" }]
 keywords = [
     "json",
     "jolt",
