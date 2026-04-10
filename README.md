@@ -2,8 +2,11 @@
 
 A high-performance, pure-Python implementation of the [JOLT](https://github.com/bazaarvoice/jolt) JSON-to-JSON transformation library.
 
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
+[![PyPI version](https://img.shields.io/pypi/v/pyjolt.svg)](https://pypi.org/project/pyjolt/)
+[![Python](https://img.shields.io/pypi/pyversions/pyjolt.svg)](https://pypi.org/project/pyjolt/)
+[![CI](https://github.com/sthitaprajnas/pyjolt/actions/workflows/ci.yml/badge.svg)](https://github.com/sthitaprajnas/pyjolt/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
+[![Typed](https://img.shields.io/badge/typing-py.typed-informational)](src/pyjolt/py.typed)
 
 ## Features
 

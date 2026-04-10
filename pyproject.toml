@@ -2,17 +2,32 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# ---------------------------------------------------------------------------
+# Project metadata
+# ---------------------------------------------------------------------------
+
 [project]
 name = "pyjolt"
-version = "0.1.0"
-description = "High-performance Python implementation of the JOLT JSON-to-JSON transformation library"
+version = "1.0.0"
+description = "High-performance, pure-Python implementation of the JOLT JSON-to-JSON transformation library"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+license = { file = "LICENSE" }
 authors = [{ name = "PyJolt Contributors" }]
-keywords = ["json", "transform", "jolt", "data", "etl", "mapping"]
+maintainers = [{ name = "PyJolt Contributors" }]
+keywords = [
+    "json",
+    "jolt",
+    "transform",
+    "data",
+    "etl",
+    "mapping",
+    "pipeline",
+    "shift",
+    "chainr",
+]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
@@ -21,15 +36,19 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Text Processing :: General",
+    "Topic :: Utilities",
     "Typing :: Typed",
 ]
 
 [project.urls]
-Homepage = "https://github.com/sthitaprajnas/pyjolt"
-Repository = "https://github.com/sthitaprajnas/pyjolt"
-Issues = "https://github.com/sthitaprajnas/pyjolt/issues"
+Homepage      = "https://github.com/sthitaprajnas/pyjolt"
+Repository    = "https://github.com/sthitaprajnas/pyjolt"
+Documentation = "https://github.com/sthitaprajnas/pyjolt#readme"
+Changelog     = "https://github.com/sthitaprajnas/pyjolt/blob/main/CHANGELOG.md"
+Issues        = "https://github.com/sthitaprajnas/pyjolt/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -37,22 +56,44 @@ dev = [
     "pytest-cov>=5.0",
     "mypy>=1.10",
     "ruff>=0.4",
+    "build>=1.0",
+    "twine>=5.0",
 ]
+
+# ---------------------------------------------------------------------------
+# Build
+# ---------------------------------------------------------------------------
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pyjolt"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "tests/",
+    "LICENSE",
+    "NOTICE",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    "pyproject.toml",
+]
+
+# ---------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+addopts   = "-v --tb=short"
 
 [tool.mypy]
-strict = true
+strict         = true
 python_version = "3.10"
-files = ["src/pyjolt"]
+files          = ["src/pyjolt"]
 
 [tool.ruff]
-line-length = 100
+line-length    = 100
 target-version = "py310"
 
 [tool.ruff.lint]
@@ -63,4 +104,10 @@ ignore = ["E501"]
 source = ["src/pyjolt"]
 
 [tool.coverage.report]
-show_missing = true
+show_missing  = true
+skip_covered  = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+]

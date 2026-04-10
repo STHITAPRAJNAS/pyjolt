@@ -1,3 +1,17 @@
+# Copyright 2024 PyJolt Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Chainr — orchestrate a sequence of transforms.
 
 The spec is a JSON array where each element has an ``"operation"`` key and an
@@ -22,6 +36,7 @@ Supported operation names
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from .exceptions import SpecError
@@ -33,7 +48,7 @@ from .transforms.remove import Remove
 from .transforms.shift import Shift
 from .transforms.sort import Sort
 
-_OPERATIONS: dict[str, type[Transform]] = {
+_OPERATIONS: dict[str, Callable[[Any], Transform]] = {
     "shift": Shift,
     "default": Default,
     "remove": Remove,
@@ -84,7 +99,7 @@ class Chainr:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_spec(cls, spec: list[dict[str, Any]]) -> "Chainr":
+    def from_spec(cls, spec: list[dict[str, Any]]) -> Chainr:
         """Create a :class:`Chainr` from a JOLT-style spec list.
 
         Parameters

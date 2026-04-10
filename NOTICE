@@ -1,0 +1,9 @@
+PyJolt
+Copyright 2024 PyJolt Contributors
+
+This product includes software developed at the PyJolt project
+(https://github.com/sthitaprajnas/pyjolt).
+
+This software is a Python implementation inspired by the JOLT library
+(https://github.com/bazaarvoice/jolt), originally developed by Bazaarvoice, Inc.
+and licensed under the Apache License, Version 2.0.
