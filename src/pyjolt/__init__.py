@@ -66,6 +66,6 @@ __all__ = [
 ]
 
 try:
-    __version__: str = version("pyjolt")
+    __version__: str = version("jolt-py")
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "1.0.0"

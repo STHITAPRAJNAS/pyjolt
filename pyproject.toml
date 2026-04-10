@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # ---------------------------------------------------------------------------
 
 [project]
-name = "pyjolt"
+name = "jolt-py"
 version = "1.0.0"
 description = "High-performance, pure-Python implementation of the JOLT JSON-to-JSON transformation library"
 readme = "README.md"
