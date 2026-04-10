@@ -26,26 +26,38 @@ from .base import Transform
 # Path elements
 # ---------------------------------------------------------------------------
 
+
 class _Literal:
     __slots__ = ("value",)
-    def __init__(self, value: str) -> None: self.value = value
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+
 
 class _Amp:
     __slots__ = ("levels", "capture")
+
     def __init__(self, levels: int, capture: int) -> None:
         self.levels, self.capture = levels, capture
 
+
 class _At:
     __slots__ = ("levels", "path")
+
     def __init__(self, levels: int, path: tuple[str, ...]) -> None:
         self.levels, self.path = levels, path
 
+
 class _HashLiteral:
     __slots__ = ("value",)
-    def __init__(self, value: str) -> None: self.value = value
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+
 
 class _ArrayAppend:
     __slots__ = ()
+
 
 _Part = _Literal | _Amp | _At | _HashLiteral | _ArrayAppend
 _Segment = list[_Part]
@@ -65,197 +77,294 @@ _RE_TOKENS = re.compile(r"(&\(\d+,\d+\)|&\d+|&|@\(\d+,[\w.]+\)|#[^.]*)")
 # Parsing
 # ---------------------------------------------------------------------------
 
+
 def _parse_part(tok: str) -> _Part:
-    if (m := _RE_AMP_NM.fullmatch(tok)): return _Amp(int(m.group(1)), int(m.group(2)))
-    if (m := _RE_AMP_N.fullmatch(tok)): return _Amp(int(m.group(1)), 0)
-    if _RE_AMP_BARE.fullmatch(tok): return _Amp(0, 0)
-    if (m := _RE_AT_NP.fullmatch(tok)): return _At(int(m.group(1)), tuple(m.group(2).split(".")))
-    if (m := _RE_HASH.fullmatch(tok)): return _HashLiteral(m.group(1))
+    if m := _RE_AMP_NM.fullmatch(tok):
+        return _Amp(int(m.group(1)), int(m.group(2)))
+    if m := _RE_AMP_N.fullmatch(tok):
+        return _Amp(int(m.group(1)), 0)
+    if _RE_AMP_BARE.fullmatch(tok):
+        return _Amp(0, 0)
+    if m := _RE_AT_NP.fullmatch(tok):
+        return _At(int(m.group(1)), tuple(m.group(2).split(".")))
+    if m := _RE_HASH.fullmatch(tok):
+        return _HashLiteral(m.group(1))
     return _Literal(tok)
+
 
 def _parse_segment(raw: str) -> _Segment:
     append = raw.endswith("[]")
-    if append: raw = raw[:-2]
-    if not raw and append: return [_ArrayAppend()]
+    if append:
+        raw = raw[:-2]
+    if not raw and append:
+        return [_ArrayAppend()]
     parts = [_parse_part(p) for p in _RE_TOKENS.split(raw) if p]
-    if append: parts.append(_ArrayAppend())
+    if append:
+        parts.append(_ArrayAppend())
     return parts
+
 
 def _split_dots(path: str) -> list[str]:
     segments = []
     depth, buf = 0, []
     for ch in path:
-        if ch == "(": depth += 1; buf.append(ch)
-        elif ch == ")": depth -= 1; buf.append(ch)
+        if ch == "(":
+            depth += 1
+            buf.append(ch)
+        elif ch == ")":
+            depth -= 1
+            buf.append(ch)
         elif ch == "." and depth == 0:
-            if buf: segments.append("".join(buf)); buf = []
-        else: buf.append(ch)
-    if buf: segments.append("".join(buf))
+            if buf:
+                segments.append("".join(buf))
+                buf = []
+        else:
+            buf.append(ch)
+    if buf:
+        segments.append("".join(buf))
     return segments
+
 
 def _parse_output_path(raw: str) -> list[_Segment]:
     return [_parse_segment(seg) for seg in _split_dots(raw)]
+
 
 # ---------------------------------------------------------------------------
 # Context & Spec
 # ---------------------------------------------------------------------------
 
+
 class _Ctx:
     __slots__ = ("key", "groups", "input_val")
+
     def __init__(self, key: str, groups: tuple[str, ...], input_val: Any) -> None:
         self.key, self.groups, self.input_val = key, groups, input_val
 
+
 class _SpecLeaf:
     __slots__ = ("paths",)
-    def __init__(self, paths: list[list[_Segment]]) -> None: self.paths = paths
+
+    def __init__(self, paths: list[list[_Segment]]) -> None:
+        self.paths = paths
+
 
 class _SpecNode:
     __slots__ = ("literals", "wildcards", "at_self", "dollar_refs", "hash_consts")
+
     def __init__(self) -> None:
         self.literals: dict[str, _SpecLeaf | _SpecNode] = {}
         self.wildcards: list[tuple[re.Pattern[str], str, _SpecLeaf | _SpecNode]] = []
-        self.at_self = None
+        self.at_self: _SpecLeaf | _SpecNode | None = None
         self.dollar_refs: list[tuple[int, _SpecLeaf | _SpecNode]] = []
         self.hash_consts: list[tuple[str, _SpecLeaf | _SpecNode]] = []
 
+
 def _build_spec(raw: Any) -> _SpecLeaf | _SpecNode:
-    if raw is None: return _SpecLeaf([[]])
-    if isinstance(raw, str): return _SpecLeaf([_parse_output_path(raw)])
-    if isinstance(raw, list): return _SpecLeaf([_parse_output_path(i) for i in raw if isinstance(i, str)])
+    if raw is None:
+        return _SpecLeaf([[]])
+    if isinstance(raw, str):
+        return _SpecLeaf([_parse_output_path(raw)])
+    if isinstance(raw, list):
+        return _SpecLeaf([_parse_output_path(i) for i in raw if isinstance(i, str)])
     if isinstance(raw, dict):
         node = _SpecNode()
         for k, v in raw.items():
             child = _build_spec(v)
-            if k == "@": node.at_self = child
-            elif (m := re.match(r"^\$(\d*)$", k)): node.dollar_refs.append((int(m.group(1)) if m.group(1) else 0, child))
-            elif (m := re.match(r"^#(.+)$", k)): node.hash_consts.append((m.group(1), child))
+            if k == "@":
+                node.at_self = child
+            elif m := re.match(r"^\$(\d*)$", k):
+                node.dollar_refs.append((int(m.group(1)) if m.group(1) else 0, child))
+            elif m := re.match(r"^#(.+)$", k):
+                node.hash_consts.append((m.group(1), child))
             else:
                 for alt in [s.strip() for s in k.split("|")]:
                     if "*" in alt:
                         parts = alt.split("*")
                         p = "(.*)".join(re.escape(s) for s in parts)
                         node.wildcards.append((re.compile(f"^{p}$"), alt, child))
-                    else: node.literals[alt] = child
+                    else:
+                        node.literals[alt] = child
         return node
     raise SpecError(f"Invalid spec type {type(raw).__name__}")
+
 
 # ---------------------------------------------------------------------------
 # Resolution & Writing
 # ---------------------------------------------------------------------------
 
+
 def _resolve_amp(amp: _Amp, ctx: list[_Ctx]) -> str:
     idx = -(amp.levels + 1)
-    if abs(idx) > len(ctx): raise TransformError(f"&{amp.levels} out of range")
+    if abs(idx) > len(ctx):
+        raise TransformError(f"&{amp.levels} out of range")
     e = ctx[idx]
-    if amp.capture == 0: return e.key
-    if amp.capture < len(e.groups): return e.groups[amp.capture]
+    if amp.capture == 0:
+        return e.key
+    if amp.capture < len(e.groups):
+        return e.groups[amp.capture]
     raise TransformError(f"&({amp.levels},{amp.capture}) capture group not available")
+
 
 def _resolve_at(at: _At, ctx: list[_Ctx], val: Any) -> Any:
     idx = -(at.levels + 1)
     v = val if abs(idx) > len(ctx) else ctx[idx].input_val
     for p in at.path:
-        if isinstance(v, dict): v = v.get(p)
+        if isinstance(v, dict):
+            v = v.get(p)
         elif isinstance(v, list):
-            try: v = v[int(p)]
-            except: v = None
-        else: v = None
-        if v is None: break
+            try:
+                v = v[int(p)]
+            except Exception:
+                v = None
+        else:
+            v = None
+        if v is None:
+            break
     return v
 
-def _resolve_path(segments: list[_Segment], ctx: list[_Ctx], val: Any) -> tuple[list[str], list[str], bool]:
+
+def _resolve_path(
+    segments: list[_Segment], ctx: list[_Ctx], val: Any
+) -> tuple[list[str], list[str], bool]:
     keys = []
     slot_after = None
     for seg in segments:
         parts, is_array = [], False
         for p in seg:
-            if isinstance(p, _Literal): parts.append(p.value)
-            elif isinstance(p, _Amp): parts.append(_resolve_amp(p, ctx))
+            if isinstance(p, _Literal):
+                parts.append(p.value)
+            elif isinstance(p, _Amp):
+                parts.append(_resolve_amp(p, ctx))
             elif isinstance(p, _At):
                 v = _resolve_at(p, ctx, val)
                 parts.append("" if v is None else str(v))
-            elif isinstance(p, _HashLiteral): parts.append(p.value)
-            elif isinstance(p, _ArrayAppend): is_array = True
+            elif isinstance(p, _HashLiteral):
+                parts.append(p.value)
+            elif isinstance(p, _ArrayAppend):
+                is_array = True
         k = "".join(parts)
-        if k or not is_array: keys.append(k)
-        if is_array and slot_after is None: slot_after = len(keys)
-    if slot_after is None: return keys, [], False
+        if k or not is_array:
+            keys.append(k)
+        if is_array and slot_after is None:
+            slot_after = len(keys)
+    if slot_after is None:
+        return keys, [], False
     return keys[:slot_after], keys[slot_after:], True
 
-def _write(out: dict, pre: list[str], post: list[str], val: Any, append: bool, slots: dict, ctx: list[_Ctx]) -> None:
-    node = out
+
+def _write(
+    out: dict[str, Any],
+    pre: list[str],
+    post: list[str],
+    val: Any,
+    append: bool,
+    slots: dict[tuple[int, tuple[str, ...]], dict[str, Any]],
+    ctx: list[_Ctx],
+) -> None:
+    node: Any = out
     for k in pre[:-1]:
-        if not isinstance(node.get(k), (dict, list)): node[k] = {}
+        if not isinstance(node.get(k), (dict, list)):
+            node[k] = {}
         node = node[k]
-    
+
     ak = pre[-1]
     if not append:
         if isinstance(node, dict):
             if ak in node:
-                if isinstance(node[ak], list): node[ak].append(val)
-                else: node[ak] = [node[ak], val]
-            else: node[ak] = val
+                if isinstance(node[ak], list):
+                    node[ak].append(val)
+                else:
+                    node[ak] = [node[ak], val]
+            else:
+                node[ak] = val
         return
 
-    if not isinstance(node.get(ak), list): node[ak] = []
+    if not isinstance(node.get(ak), list):
+        node[ak] = []
     arr = node[ak]
-    if not post: arr.append(val); return
-    
+    if not post:
+        arr.append(val)
+        return
+
     rk = (id(arr), tuple(c.key for c in ctx[:-1]))
     if rk not in slots:
-        slot = {}
+        slot: dict[str, Any] = {}
         arr.append(slot)
         slots[rk] = slot
     inner = slots[rk]
     for k in post[:-1]:
-        if not isinstance(inner.get(k), dict): inner[k] = {}
+        if not isinstance(inner.get(k), dict):
+            inner[k] = {}
         inner = inner[k]
     lk = post[-1]
     if lk in inner:
-        if isinstance(inner[lk], list): inner[lk].append(val)
-        else: inner[lk] = [inner[lk], val]
-    else: inner[lk] = val
+        if isinstance(inner[lk], list):
+            inner[lk].append(val)
+        else:
+            inner[lk] = [inner[lk], val]
+    else:
+        inner[lk] = val
+
 
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
 
-def _apply(val: Any, spec: _SpecLeaf | _SpecNode, ctx: list[_Ctx], out: dict, slots: dict) -> None:
+
+def _apply(
+    val: Any,
+    spec: _SpecLeaf | _SpecNode,
+    ctx: list[_Ctx],
+    out: dict[str, Any],
+    slots: dict[tuple[int, tuple[str, ...]], dict[str, Any]],
+) -> None:
     if isinstance(spec, _SpecLeaf):
-        for p in spec.paths:
-            pre, post, append = _resolve_path(p, ctx, val)
-            if pre: _write(out, pre, post, val, append, slots, ctx)
+        for path_list in spec.paths:
+            pre, post, append = _resolve_path(path_list, ctx, val)
+            if pre:
+                _write(out, pre, post, val, append, slots, ctx)
         return
-    if spec.at_self: _apply(val, spec.at_self, ctx, out, slots)
+    if spec.at_self:
+        _apply(val, spec.at_self, ctx, out, slots)
     if isinstance(val, dict):
         for k, v in val.items():
             sk = str(k)
-            if sk in spec.literals: _apply(v, spec.literals[sk], ctx + [_Ctx(sk, (sk,), v)], out, slots)
+            if sk in spec.literals:
+                _apply(v, spec.literals[sk], ctx + [_Ctx(sk, (sk,), v)], out, slots)
             else:
-                for p, r, c in spec.wildcards:
-                    if (m := p.match(sk)): _apply(v, c, ctx + [_Ctx(sk, (sk,) + m.groups(), v)], out, slots)
+                for pattern, _, child in spec.wildcards:
+                    if m := pattern.match(sk):
+                        _apply(v, child, ctx + [_Ctx(sk, (sk,) + m.groups(), v)], out, slots)
     elif isinstance(val, list):
         for i, v in enumerate(val):
             si = str(i)
-            if si in spec.literals: _apply(v, spec.literals[si], ctx + [_Ctx(si, (si,), v)], out, slots)
-            for p, r, c in spec.wildcards:
-                if (m := p.match(si)): _apply(v, c, ctx + [_Ctx(si, (si,) + m.groups(), v)], out, slots)
+            if si in spec.literals:
+                _apply(v, spec.literals[si], ctx + [_Ctx(si, (si,), v)], out, slots)
+            for pattern, _, child in spec.wildcards:
+                if m := pattern.match(si):
+                    _apply(v, child, ctx + [_Ctx(si, (si,) + m.groups(), v)], out, slots)
     else:
         sv = str(val)
-        if sv in spec.literals: _apply(val, spec.literals[sv], ctx + [_Ctx(sv, (sv,), val)], out, slots)
+        if sv in spec.literals:
+            _apply(val, spec.literals[sv], ctx + [_Ctx(sv, (sv,), val)], out, slots)
         else:
-            for p, r, c in spec.wildcards:
-                if (m := p.match(sv)): _apply(val, c, ctx + [_Ctx(sv, (sv,) + m.groups(), val)], out, slots)
-    for l, c in spec.dollar_refs:
-        kv = ctx[-(l+1)].key if abs(-(l+1)) <= len(ctx) else ""
-        _apply(kv, c, ctx + [_Ctx("$", (kv,), kv)], out, slots)
-    for v, c in spec.hash_consts:
-        _apply(v, c, ctx + [_Ctx(f"#{v}", (v,), v)], out, slots)
+            for pattern, _, child in spec.wildcards:
+                if m := pattern.match(sv):
+                    _apply(val, child, ctx + [_Ctx(sv, (sv,) + m.groups(), val)], out, slots)
+    for level, child_spec in spec.dollar_refs:
+        kv = ctx[-(level + 1)].key if abs(-(level + 1)) <= len(ctx) else ""
+        _apply(kv, child_spec, ctx + [_Ctx("$", (kv,), kv)], out, slots)
+    for v_const, c_spec in spec.hash_consts:
+        _apply(v_const, c_spec, ctx + [_Ctx(f"#{v_const}", (v_const,), v_const)], out, slots)
+
 
 class Shift(Transform):
     __slots__ = ("_root",)
-    def __init__(self, spec: dict[str, Any]) -> None: self._root = _build_spec(spec)
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self._root = _build_spec(spec)
+
     def apply(self, data: Any) -> Any:
-        out = {}
+        out: dict[str, Any] = {}
         _apply(data, self._root, [], out, {})
         return out

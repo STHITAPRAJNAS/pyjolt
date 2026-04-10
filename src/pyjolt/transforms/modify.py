@@ -289,6 +289,7 @@ def _avg(val: Any, *_: Any) -> Any:
 @_register("sqrt")
 def _sqrt(val: Any, *_: Any) -> Any:
     import math
+
     if isinstance(val, (int, float)):
         try:
             return math.sqrt(val)

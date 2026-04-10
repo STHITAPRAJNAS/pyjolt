@@ -9,14 +9,8 @@ from __future__ import annotations
 
 from pyjolt import Chainr
 from pyjolt.transforms import (
-    Cardinality,
-    Default,
-    ModifyOverwrite,
-    Remove,
     Shift,
-    Sort,
 )
-
 
 # ---------------------------------------------------------------------------
 # 1. E-commerce order normalisation
@@ -65,11 +59,7 @@ class TestEcommerceOrder:
         {
             # Normalise prices from strings to floats
             "operation": "modify-overwrite-beta",
-            "spec": {
-                "items": {
-                    "*": {"price": "=toDouble"}
-                }
-            },
+            "spec": {"items": {"*": {"price": "=toDouble"}}},
         },
         {
             "operation": "default",
@@ -172,11 +162,7 @@ class TestApiResponseNormalisation:
         },
         {
             "operation": "default",
-            "spec": {
-                "repos": {
-                    "*": {"language": "unknown"}
-                }
-            },
+            "spec": {"repos": {"*": {"language": "unknown"}}},
         },
         {
             "operation": "sort",
@@ -300,6 +286,7 @@ class TestUserProfileFlattening:
         result = Chainr.from_spec(self.SPEC).apply(self.RAW_USER)
         # email, phone, passwordHash, sessionToken must not leak through
         import json
+
         flat = json.dumps(result)
         assert "bob@example.com" not in flat
         assert "+1-555-0100" not in flat

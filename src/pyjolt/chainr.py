@@ -129,8 +129,7 @@ class Chainr:
             klass = _OPERATIONS.get(str(op))
             if klass is None:
                 raise SpecError(
-                    f"Unknown operation {op!r} at spec[{i}]. "
-                    f"Supported: {sorted(_OPERATIONS)}"
+                    f"Unknown operation {op!r} at spec[{i}]. Supported: {sorted(_OPERATIONS)}"
                 )
             transform_spec = entry.get("spec", {})
             transforms.append(klass(transform_spec))

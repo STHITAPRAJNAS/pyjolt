@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from pyjolt.transforms import Shift
 
 
@@ -28,8 +26,7 @@ class TestDollarKeyAsValue:
 
     def test_dollar_one_is_parent_key(self):
         """$1 writes the key matched one level above."""
-        result = shift({"section": {"*": {"$1": "sectionNames[]"}}},
-                       {"section": {"a": 1, "b": 2}})
+        result = shift({"section": {"*": {"$1": "sectionNames[]"}}}, {"section": {"a": 1, "b": 2}})
         # $1 at depth of "*" match = key matched by literal "section" = "section"
         assert result["sectionNames"] == ["section", "section"]
 
