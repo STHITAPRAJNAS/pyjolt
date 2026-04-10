@@ -12,7 +12,7 @@ version = "1.0.0"
 description = "High-performance, pure-Python implementation of the JOLT JSON-to-JSON transformation library"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Sthitaprajna Sahoo", email = "papu.sahoo@gmail.com" }]
 maintainers = [{ name = "Sthitaprajna Sahoo", email = "papu.sahoo@gmail.com" }]
 keywords = [
