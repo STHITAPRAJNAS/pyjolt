@@ -32,6 +32,8 @@ Supported operation names
 * ``"cardinality"``            — :class:`~pyjolt.transforms.Cardinality`
 * ``"modify-overwrite-beta"``  — :class:`~pyjolt.transforms.ModifyOverwrite`
 * ``"modify-default-beta"``    — :class:`~pyjolt.transforms.ModifyDefault`
+* ``"modify-overwrite"``       — :class:`~pyjolt.transforms.ModifyOverwrite`
+* ``"modify-default"``         — :class:`~pyjolt.transforms.ModifyDefault`
 """
 
 from __future__ import annotations
@@ -56,6 +58,8 @@ _OPERATIONS: dict[str, Callable[[Any], Transform]] = {
     "cardinality": Cardinality,
     "modify-overwrite-beta": ModifyOverwrite,
     "modify-default-beta": ModifyDefault,
+    "modify-overwrite": ModifyOverwrite,
+    "modify-default": ModifyDefault,
 }
 
 
@@ -125,8 +129,7 @@ class Chainr:
             klass = _OPERATIONS.get(str(op))
             if klass is None:
                 raise SpecError(
-                    f"Unknown operation {op!r} at spec[{i}]. "
-                    f"Supported: {sorted(_OPERATIONS)}"
+                    f"Unknown operation {op!r} at spec[{i}]. Supported: {sorted(_OPERATIONS)}"
                 )
             transform_spec = entry.get("spec", {})
             transforms.append(klass(transform_spec))

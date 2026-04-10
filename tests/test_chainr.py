@@ -6,7 +6,7 @@ import pytest
 
 from pyjolt import Chainr
 from pyjolt.exceptions import SpecError
-from pyjolt.transforms import Default, Remove, Shift, Sort
+from pyjolt.transforms import Default, Shift, Sort
 
 
 class TestChainrFromSpec:
