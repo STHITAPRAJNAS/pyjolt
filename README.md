@@ -27,6 +27,19 @@ A high-performance, pure-Python implementation of the [JOLT](https://github.com/
 pip install jolt-py
 ```
 
+## CLI Usage
+
+`jolt-py` includes a command-line interface for testing specs or running
+transformations in shell pipelines:
+
+```bash
+# Transform a file
+pyjolt input.json --spec spec.json --indent 2
+
+# Use in a pipeline
+cat input.json | pyjolt --spec spec.json > output.json
+```
+
 ## Quick Start
 
 The canonical JOLT example — re-shape a nested rating object:
