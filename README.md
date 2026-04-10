@@ -273,6 +273,8 @@ s.apply({"user": {"name": "Alice", "age": 30}})
 | `*` | Match any key (combinable: `prefix_*_suffix`) |
 | `a\|b` | Match key `a` OR `b` |
 | `@` | Self-reference — use the current input node directly |
+| `$` / `$N` | Emit the matched key name N levels up as the value |
+| `#literal` | Emit the literal string `literal` as a constant value |
 
 **Spec tokens — output path:**
 
@@ -313,6 +315,32 @@ s.apply({"a": 1, "b": 2})  # → {"vals": [1, 2]}
 ```python
 s = Shift({"id": ["primary.id", "backup.id"]})
 s.apply({"id": 7})  # → {"primary": {"id": 7}, "backup": {"id": 7}}
+```
+
+**Key-as-value (`$` / `$N`):**
+
+```python
+# $ writes the matched key name as the value
+s = Shift({"*": {"$": "keys[]"}})
+s.apply({"foo": 1, "bar": 2})  # → {"keys": ["foo", "bar"]}
+
+# $1 writes the key matched one level up
+s = Shift({"sensors": {"*": {"value": "out[].v", "$1": "out[].section"}}})
+s.apply({"sensors": {"temp": {"value": 22}}})
+# → {"out": [{"v": 22, "section": "sensors"}]}
+```
+
+**Constant-as-value (`#literal`):**
+
+```python
+# #literal writes the fixed string "literal" as the value
+s = Shift({"*": {"#photo": "types[]"}})
+s.apply({"a": 1, "b": 2})  # → {"types": ["photo", "photo"]}
+
+# Combine with back-references in the output path
+s = Shift({"*": {"#widget": "catalog.&1.kind"}})
+s.apply({"foo": {}, "bar": {}})
+# → {"catalog": {"foo": {"kind": "widget"}, "bar": {"kind": "widget"}}}
 ```
 
 ### Default
@@ -417,13 +445,26 @@ ModifyOverwrite({"prices": {"*": {"amount": "=toDouble"}}}).apply(
 | `=toUpperCase` / `=toLowerCase` | Change case |
 | `=abs` | Absolute value |
 | `=min(N)` / `=max(N)` | Clamp to min/max |
-| `=intSum(N)` / `=doubleSum(N)` | Add N to value |
+| `=intSum(N)` / `=doubleSum(N)` / `=longSum(N)` / `=floatSum(N)` | Add N to value |
+| `=sum` | Sum all elements of a numeric list |
+| `=avg` | Average of a numeric list |
+| `=sqrt` | Square root |
+| `=not` | Boolean negation |
 | `=size` | Length of string/list |
 | `=concat(suffix)` | Append suffix to string value |
 | `=join(sep)` | Join list with separator |
 | `=split(sep)` | Split string by separator |
+| `=leftPad(width,char)` / `=rightPad(width,char)` | Pad string to width |
+| `=substring(start,end)` | Slice a string |
+| `=startsWith(prefix)` / `=endsWith(suffix)` | Predicate on string |
+| `=contains(item)` | True if item is in string or list |
 | `=squashNulls` | Remove `null` entries from list |
 | `=recursivelySquashNulls` | Recursively remove `null` entries |
+| `=toList` | Wrap value in a list if not already one |
+| `=firstElement` / `=lastElement` | First or last list element |
+| `=elementAt(N)` | Nth list element |
+| `=indexOf(item)` | Index of item in list/string |
+| `=coalesce(fallback,…)` | First non-null from value + args |
 | `=noop` | Identity (leave value unchanged) |
 
 ### Chainr

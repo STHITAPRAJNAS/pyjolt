@@ -229,7 +229,7 @@ class _SpecLeaf:
 class _SpecNode:
     """Internal spec node with child matchers."""
 
-    __slots__ = ("literals", "wildcards", "at_self")
+    __slots__ = ("literals", "wildcards", "at_self", "dollar_refs", "hash_consts")
 
     def __init__(self) -> None:
         # Exact-key children
@@ -238,6 +238,16 @@ class _SpecNode:
         self.wildcards: list[tuple[re.Pattern[str], str, _SpecLeaf | _SpecNode]] = []
         # '@' self-reference child
         self.at_self: _SpecLeaf | _SpecNode | None = None
+        # '$N' — write the key name at level N as the value
+        # Each entry: (level: int, child)
+        self.dollar_refs: list[tuple[int, _SpecLeaf | _SpecNode]] = []
+        # '#constant' — write a literal constant string as the value
+        # Each entry: (constant: str, child)
+        self.hash_consts: list[tuple[str, _SpecLeaf | _SpecNode]] = []
+
+
+_RE_DOLLAR = re.compile(r"^\$(\d*)$")  # $, $0, $1, …
+_RE_HASH_CONST = re.compile(r"^#(.+)$")  # #literal (non-empty)
 
 
 def _wildcard_to_regex(key: str) -> re.Pattern[str]:
@@ -263,16 +273,32 @@ def _build_spec(raw: Any) -> _SpecLeaf | _SpecNode:
         node = _SpecNode()
         for key, val in raw.items():
             child = _build_spec(val)
+
+            # '@' — self-reference: use the current input value
             if key == "@":
                 node.at_self = child
-            else:
-                # Expand OR patterns (``"a|b"``) into separate entries
-                alternatives = [k.strip() for k in key.split("|")]
-                for alt in alternatives:
-                    if "*" in alt:
-                        node.wildcards.append((_wildcard_to_regex(alt), alt, child))
-                    else:
-                        node.literals[alt] = child
+                continue
+
+            # '$' / '$N' — write the key name at context level N as the value
+            m = _RE_DOLLAR.match(key)
+            if m:
+                level = int(m.group(1)) if m.group(1) else 0
+                node.dollar_refs.append((level, child))
+                continue
+
+            # '#constant' — write a literal constant string as the value
+            m = _RE_HASH_CONST.match(key)
+            if m:
+                node.hash_consts.append((m.group(1), child))
+                continue
+
+            # Expand OR patterns (``"a|b"``) into separate entries
+            alternatives = [k.strip() for k in key.split("|")]
+            for alt in alternatives:
+                if "*" in alt:
+                    node.wildcards.append((_wildcard_to_regex(alt), alt, child))
+                else:
+                    node.literals[alt] = child
         return node
 
     raise SpecError(f"Invalid shift spec value type {type(raw).__name__!r}: {raw!r}")
@@ -551,6 +577,21 @@ def _apply(
     elif isinstance(input_val, list):
         _apply_list(input_val, spec, ctx, output, slot_registry)
     # Scalar with non-leaf spec: nothing to descend into
+
+    # '$N' — emit the key name at context level N as the written value.
+    # Push a dummy ctx entry so that &N back-references and the slot_registry
+    # iter_key depth align with sibling regular field moves.
+    for level, child in spec.dollar_refs:
+        idx = -(level + 1)
+        key_val = ctx[idx].key if abs(idx) <= len(ctx) else ""
+        dummy_ctx = ctx + [_Ctx("$", (key_val,), key_val)]
+        _apply(key_val, child, dummy_ctx, output, slot_registry)
+
+    # '#constant' — emit a literal constant string as the written value.
+    # Same dummy-ctx trick for consistent slot_registry / &N alignment.
+    for const_val, child in spec.hash_consts:
+        dummy_ctx = ctx + [_Ctx(f"#{const_val}", (const_val,), const_val)]
+        _apply(const_val, child, dummy_ctx, output, slot_registry)
 
 
 def _apply_dict(

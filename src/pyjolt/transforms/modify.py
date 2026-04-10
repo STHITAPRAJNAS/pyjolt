@@ -227,6 +227,178 @@ def _noop(val: Any, *_: Any) -> Any:
     return val
 
 
+# ---- Additional numeric functions -------------------------------------------
+
+
+@_register("longSum")
+def _long_sum(val: Any, *args: Any) -> Any:
+    try:
+        return int(val or 0) + sum(int(a) for a in args)
+    except (TypeError, ValueError):
+        return val
+
+
+@_register("floatSum")
+def _float_sum(val: Any, *args: Any) -> Any:
+    try:
+        return float(val or 0) + sum(float(a) for a in args)
+    except (TypeError, ValueError):
+        return val
+
+
+@_register("sum")
+def _sum(val: Any, *_: Any) -> Any:
+    """Sum all elements of a numeric list."""
+    if isinstance(val, list):
+        try:
+            return sum(v for v in val if v is not None)
+        except TypeError:
+            return val
+    return val
+
+
+@_register("avg")
+def _avg(val: Any, *_: Any) -> Any:
+    """Average of a numeric list."""
+    if isinstance(val, list):
+        nums = [v for v in val if v is not None]
+        if not nums:
+            return None
+        try:
+            return sum(nums) / len(nums)
+        except TypeError:
+            return val
+    return val
+
+
+@_register("sqrt")
+def _sqrt(val: Any, *_: Any) -> Any:
+    import math
+    if isinstance(val, (int, float)):
+        try:
+            return math.sqrt(val)
+        except ValueError:
+            return None
+    return val
+
+
+@_register("not")
+def _not(val: Any, *_: Any) -> Any:
+    """Boolean negation."""
+    if val is None:
+        return None
+    return not bool(val)
+
+
+# ---- Additional string functions --------------------------------------------
+
+
+@_register("leftPad")
+def _left_pad(val: Any, width: Any = 0, char: Any = " ", *_: Any) -> Any:
+    if isinstance(val, str):
+        return str(val).rjust(int(width), str(char)[0])
+    return val
+
+
+@_register("rightPad")
+def _right_pad(val: Any, width: Any = 0, char: Any = " ", *_: Any) -> Any:
+    if isinstance(val, str):
+        return str(val).ljust(int(width), str(char)[0])
+    return val
+
+
+@_register("substring")
+def _substring(val: Any, start: Any = 0, end: Any = None, *_: Any) -> Any:
+    if isinstance(val, str):
+        s = int(start)
+        e = int(end) if end is not None else None
+        return val[s:e]
+    return val
+
+
+@_register("startsWith")
+def _starts_with(val: Any, prefix: Any = "", *_: Any) -> Any:
+    if isinstance(val, str):
+        return val.startswith(str(prefix))
+    return False
+
+
+@_register("endsWith")
+def _ends_with(val: Any, suffix: Any = "", *_: Any) -> Any:
+    if isinstance(val, str):
+        return val.endswith(str(suffix))
+    return False
+
+
+@_register("contains")
+def _contains(val: Any, item: Any = None, *_: Any) -> Any:
+    """Return True if *item* is in *val* (works for strings and lists)."""
+    if val is None:
+        return False
+    try:
+        return item in val  # type: ignore[operator]
+    except TypeError:
+        return False
+
+
+# ---- Array / collection extras ----------------------------------------------
+
+
+@_register("toList")
+def _to_list(val: Any, *_: Any) -> Any:
+    """Wrap *val* in a list if it isn't one already."""
+    if isinstance(val, list):
+        return val
+    if val is None:
+        return []
+    return [val]
+
+
+@_register("firstElement")
+def _first_element(val: Any, *_: Any) -> Any:
+    if isinstance(val, list):
+        return val[0] if val else None
+    return val
+
+
+@_register("lastElement")
+def _last_element(val: Any, *_: Any) -> Any:
+    if isinstance(val, list):
+        return val[-1] if val else None
+    return val
+
+
+@_register("elementAt")
+def _element_at(val: Any, index: Any = 0, *_: Any) -> Any:
+    if isinstance(val, list):
+        try:
+            return val[int(index)]
+        except (IndexError, ValueError):
+            return None
+    return val
+
+
+@_register("indexOf")
+def _index_of(val: Any, item: Any = None, *_: Any) -> Any:
+    if isinstance(val, list):
+        try:
+            return val.index(item)
+        except ValueError:
+            return -1
+    if isinstance(val, str) and isinstance(item, str):
+        return val.find(item)
+    return -1
+
+
+@_register("coalesce")
+def _coalesce(val: Any, *args: Any) -> Any:
+    """Return the first non-None value from *val*, *args*."""
+    for candidate in (val, *args):
+        if candidate is not None:
+            return candidate
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Function expression parsing
 # ---------------------------------------------------------------------------
