@@ -1,9 +1,9 @@
-# pyjolt
+# jolt-py
 
 A high-performance, pure-Python implementation of the [JOLT](https://github.com/bazaarvoice/jolt) JSON-to-JSON transformation library.
 
-[![PyPI version](https://img.shields.io/pypi/v/pyjolt.svg)](https://pypi.org/project/pyjolt/)
-[![Python](https://img.shields.io/pypi/pyversions/pyjolt.svg)](https://pypi.org/project/pyjolt/)
+[![PyPI version](https://img.shields.io/pypi/v/jolt-py.svg)](https://pypi.org/project/jolt-py/)
+[![Python](https://img.shields.io/pypi/pyversions/jolt-py.svg)](https://pypi.org/project/jolt-py/)
 [![CI](https://github.com/sthitaprajnas/pyjolt/actions/workflows/ci.yml/badge.svg)](https://github.com/sthitaprajnas/pyjolt/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 [![Typed](https://img.shields.io/badge/typing-py.typed-informational)](src/pyjolt/py.typed)
@@ -24,7 +24,7 @@ A high-performance, pure-Python implementation of the [JOLT](https://github.com/
 ## Installation
 
 ```bash
-pip install pyjolt
+pip install jolt-py
 ```
 
 ## Quick Start
