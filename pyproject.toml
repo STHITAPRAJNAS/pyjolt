@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 [project]
 name = "jolt-py"
 version = "1.2.1"
-description = "High-performance, pure-Python implementation of the JOLT JSON-to-JSON transformation library"
+description = "Python JOLT library for declarative JSON-to-JSON transformation, ETL pipelines, and data mapping — pure-Python port of the Java JOLT library"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -26,12 +26,26 @@ keywords = [
     "pipeline",
     "shift",
     "chainr",
+    "json-transformation",
+    "data-transformation",
+    "data-mapping",
+    "json-processing",
+    "json-to-json",
+    "etl-tool",
+    "jolt-transform",
+    "declarative",
+    "api-transformation",
+    "data-pipeline",
+    "json-schema",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
+    "Environment :: Console",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -40,6 +54,8 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Text Processing :: General",
+    "Topic :: Database",
+    "Topic :: Internet :: WWW/HTTP",
     "Topic :: Utilities",
     "Typing :: Typed",
 ]
