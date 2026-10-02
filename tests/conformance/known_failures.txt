@@ -1,0 +1,8 @@
+# Reference JOLT conformance cases that pyjolt does not pass yet.
+#
+# Each entry runs as a strict xfail: once a fix makes it pass, the suite
+# fails until the line is deleted, so this list should only ever shrink.
+# The comment after each id is the first difference found when the list
+# was generated.
+#
+# All reference cases currently pass.

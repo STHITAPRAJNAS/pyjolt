@@ -32,8 +32,11 @@ Supported operation names
 * ``"cardinality"``            — :class:`~pyjolt.transforms.Cardinality`
 * ``"modify-overwrite-beta"``  — :class:`~pyjolt.transforms.ModifyOverwrite`
 * ``"modify-default-beta"``    — :class:`~pyjolt.transforms.ModifyDefault`
-* ``"modify-overwrite"``       — :class:`~pyjolt.transforms.ModifyOverwrite`
-* ``"modify-default"``         — :class:`~pyjolt.transforms.ModifyDefault`
+* ``"modify-define-beta"``     — :class:`~pyjolt.transforms.ModifyDefine`
+* ``"modify-overwrite"`` / ``"modify-default"`` / ``"modify-define"`` — aliases
+
+The reference implementation's Java class names (``"com.bazaarvoice.jolt.Shiftr"``
+and so on) are accepted too, so specs can be copied over unchanged.
 """
 
 from __future__ import annotations
@@ -41,11 +44,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from ._common.util import deep_copy
 from .exceptions import SpecError
 from .transforms.base import Transform
 from .transforms.cardinality import Cardinality
 from .transforms.default import Default
-from .transforms.modify import ModifyDefault, ModifyOverwrite
+from .transforms.modify import ModifyDefault, ModifyDefine, ModifyOverwrite
 from .transforms.remove import Remove
 from .transforms.shift import Shift
 from .transforms.sort import Sort
@@ -58,8 +62,19 @@ _OPERATIONS: dict[str, Callable[[Any], Transform]] = {
     "cardinality": Cardinality,
     "modify-overwrite-beta": ModifyOverwrite,
     "modify-default-beta": ModifyDefault,
+    "modify-define-beta": ModifyDefine,
     "modify-overwrite": ModifyOverwrite,
     "modify-default": ModifyDefault,
+    "modify-define": ModifyDefine,
+    # Java class names used by the reference implementation
+    "com.bazaarvoice.jolt.Shiftr": Shift,
+    "com.bazaarvoice.jolt.Defaultr": Default,
+    "com.bazaarvoice.jolt.Removr": Remove,
+    "com.bazaarvoice.jolt.Sortr": Sort,
+    "com.bazaarvoice.jolt.CardinalityTransform": Cardinality,
+    "com.bazaarvoice.jolt.Modifier$Overwritr": ModifyOverwrite,
+    "com.bazaarvoice.jolt.Modifier$Defaultr": ModifyDefault,
+    "com.bazaarvoice.jolt.Modifier$Definr": ModifyDefine,
 }
 
 
@@ -140,17 +155,20 @@ class Chainr:
     # Application
     # ------------------------------------------------------------------
 
-    def apply(self, input_data: Any) -> Any:
+    def apply(self, input_data: Any, context: dict[str, Any] | None = None) -> Any:
         """Apply all transforms in order and return the final result.
 
         Parameters
         ----------
         input_data:
             The JSON-compatible Python object to transform.
+        context:
+            Optional values that modify specs can read with ``^path``.
         """
-        result = input_data
+        # Copy once; every step may then work in place, like the reference Chainr.
+        result = deep_copy(input_data)
         for transform in self._transforms:
-            result = transform.apply(result)
+            result = transform._apply_owned(result, context)
         return result
 
     def __repr__(self) -> str:

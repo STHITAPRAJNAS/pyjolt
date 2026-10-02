@@ -15,9 +15,11 @@ def test_list_to_mapped_object():
     assert result == {"A": 100, "B": 200, "C": 300}
 
 
-def test_deeply_nested_array_append_with_shared_slots():
-    """
-    Complex scenario: Ensuring out[].items[].id correctly groups within arrays.
+def test_group_nested_arrays_by_parent_index():
+    """Group each group's name and its users' logins into one element per group.
+
+    ``[]`` always appends a new element, so fields that belong together are
+    written to the same index with ``[&n]`` (the index matched n levels up).
     """
     input_data = {
         "groups": [
@@ -25,38 +27,26 @@ def test_deeply_nested_array_append_with_shared_slots():
             {"name": "Guest", "users": [{"id": 3, "login": "charlie"}]},
         ]
     }
-    # We want:
-    # {
-    #   "results": [
-    #     {"group": "Admin", "logins": ["alice", "bob"]},
-    #     {"group": "Guest", "logins": ["charlie"]}
-    #   ]
-    # }
     spec = {
         "groups": {
-            "*": {"name": "results[].group", "users": {"*": {"login": "results[].logins[]"}}}
+            "*": {
+                "name": "results[&1].group",
+                "users": {"*": {"login": "results[&3].logins[]"}},
+            }
         }
     }
-    result = Shift(spec).apply(input_data)
-    # The current slot_registry logic uses ctx[:-1].
-    # For "login", ctx is ["groups", "0", "users", "0", "login"]
-    # ctx[:-1] is ["groups", "0", "users", "0"].
-    # For "name", ctx is ["groups", "0", "name"]
-    # ctx[:-1] is ["groups", "0"].
-
-    # Wait, results[].group and results[].logins[] are in the SAME array (results[]).
-    # To group "group" and "logins" together, they must be at the same level of results[].
-
-    expected = {
+    assert Shift(spec).apply(input_data) == {
         "results": [
-            {"group": "Admin"},
-            {"logins": "alice"},
-            {"logins": "bob"},
-            {"group": "Guest"},
-            {"logins": "charlie"},
+            {"group": "Admin", "logins": ["alice", "bob"]},
+            {"group": "Guest", "logins": ["charlie"]},
         ]
     }
-    assert result == expected
+
+
+def test_bare_append_creates_one_element_per_write():
+    spec = {"groups": {"*": {"name": "results[].group", "id": "results[].id"}}}
+    data = {"groups": [{"name": "Admin", "id": 1}]}
+    assert Shift(spec).apply(data) == {"results": [{"group": "Admin"}, {"id": 1}]}
 
 
 def test_multi_level_wildcard_backref():

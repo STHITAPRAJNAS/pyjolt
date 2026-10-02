@@ -48,9 +48,9 @@ class TestEcommerceOrder:
                 },
                 "lineItems": {
                     "*": {
-                        "sku": "items[].sku",
-                        "qty": "items[].quantity",
-                        "unitPrice": "items[].price",
+                        "sku": "items[&1].sku",
+                        "qty": "items[&1].quantity",
+                        "unitPrice": "items[&1].price",
                     }
                 },
                 "shippingMethod": "shipping.method",
@@ -151,18 +151,18 @@ class TestApiResponseNormalisation:
                 "total_count": "meta.total",
                 "items": {
                     "*": {
-                        "id": "repos[].id",
-                        "full_name": "repos[].name",
-                        "stargazers_count": "repos[].stars",
-                        "language": "repos[].language",
-                        "private": "repos[].private",
+                        "id": "repos[&1].id",
+                        "full_name": "repos[&1].name",
+                        "stargazers_count": "repos[&1].stars",
+                        "language": "repos[&1].language",
+                        "private": "repos[&1].private",
                     }
                 },
             },
         },
         {
             "operation": "default",
-            "spec": {"repos": {"*": {"language": "unknown"}}},
+            "spec": {"repos[]": {"*": {"language": "unknown"}}},
         },
         {
             "operation": "sort",

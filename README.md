@@ -1,6 +1,11 @@
 # jolt-py
 
-A high-performance, pure-Python implementation of the [JOLT](https://github.com/bazaarvoice/jolt) JSON-to-JSON transformation library.
+A pure-Python implementation of the [JOLT](https://github.com/bazaarvoice/jolt) JSON-to-JSON transformation library.
+
+**Spec-compatible with JOLT.** pyjolt runs the reference implementation's own
+test suite (178 cases across every transform) on every commit and passes all
+of it, so a spec you build on the [JOLT demo site](https://jolt-demo.appspot.com)
+gives the same output here.
 
 [![PyPI version](https://img.shields.io/pypi/v/jolt-py.svg)](https://pypi.org/project/jolt-py/)
 [![Python](https://img.shields.io/pypi/pyversions/jolt-py.svg)](https://pypi.org/project/jolt-py/)
@@ -18,7 +23,8 @@ A high-performance, pure-Python implementation of the [JOLT](https://github.com/
 | `Sort` | `sort` | Sort all dict keys alphabetically |
 | `Cardinality` | `cardinality` | Enforce `ONE` or `MANY` cardinality on fields |
 | `ModifyOverwrite` | `modify-overwrite-beta` | Apply functions, always overwriting |
-| `ModifyDefault` | `modify-default-beta` | Apply functions only to absent fields |
+| `ModifyDefault` | `modify-default-beta` | Apply functions only where the value is missing or `null` |
+| `ModifyDefine` | `modify-define-beta` | Apply functions only where the key does not exist |
 | `Chainr` | — | Chain multiple transforms sequentially |
 
 ## Installation
@@ -110,9 +116,9 @@ spec = [
             },
             "lineItems": {
                 "*": {
-                    "sku":       "items[].sku",
-                    "qty":       "items[].quantity",
-                    "unitPrice": "items[].price",
+                    "sku":       "items[&1].sku",
+                    "qty":       "items[&1].quantity",
+                    "unitPrice": "items[&1].price",
                 }
             },
             "shippingMethod": "shipping.method",
@@ -159,10 +165,11 @@ result = Chainr.from_spec(spec).apply(raw_order)
 # }
 ```
 
-> **Note** — the `items[].field` syntax builds an array of objects where each
-> wildcard iteration (`*` over `lineItems`) contributes one element.  Multiple
-> fields from the same iteration (`sku`, `qty`, `price`) all land in the same
-> array slot automatically.
+> **Note** — `items[&1].sku` writes to index `&1` of `items`: the array index
+> matched one level up (by `*` over `lineItems`). Fields written with the same
+> index land in the same object. A bare `items[]` appends a *new* element on
+> every write, so it is for collecting values (`"tags[]"`), not for building
+> objects.
 
 ---
 
@@ -178,18 +185,19 @@ spec = [
             "total_count": "meta.total",
             "items": {
                 "*": {
-                    "id":               "repos[].id",
-                    "full_name":        "repos[].name",
-                    "stargazers_count": "repos[].stars",
-                    "language":         "repos[].language",
-                    "private":          "repos[].private",
+                    "id":               "repos[&1].id",
+                    "full_name":        "repos[&1].name",
+                    "stargazers_count": "repos[&1].stars",
+                    "language":         "repos[&1].language",
+                    "private":          "repos[&1].private",
                 }
             },
         },
     },
     {
         "operation": "default",
-        "spec": {"repos": {"*": {"language": "unknown"}}},
+        # "repos[]" tells default that repos is an array; "*" is each element
+        "spec": {"repos[]": {"*": {"language": "unknown"}}},
     },
     {"operation": "sort"},
 ]
@@ -225,7 +233,7 @@ spec = [
         },
     },
     {"operation": "default",         "spec": {"crm": {"plan": "free", "tags": []}}},
-    {"operation": "modify-overwrite-beta", "spec": {"crm": {"plan": "=toUpperCase"}}},
+    {"operation": "modify-overwrite-beta", "spec": {"crm": {"plan": "=toUpper"}}},
     {"operation": "cardinality",     "spec": {"crm": {"tags": "MANY"}}},
 ]
 ```
@@ -282,25 +290,34 @@ s.apply({"user": {"name": "Alice", "age": 30}})
 # → {"profile": {"fullName": "Alice", "years": 30}}
 ```
 
-**Spec tokens — input side:**
+If nothing in the input matches the spec, the result is `None`, as in JOLT.
+
+**Spec tokens — input side (keys):**
 
 | Token | Meaning |
 |-------|---------|
-| `*` | Match any key (combinable: `prefix_*_suffix`) |
+| `*` | Match any key (combinable: `prefix_*_suffix`, `*-*`) |
 | `a\|b` | Match key `a` OR `b` |
-| `@` | Self-reference — use the current input node directly |
+| `&` / `&N` | Match the key built from earlier matches |
+| `@` | The current input value itself |
+| `@(N,path)` | A value looked up in the input, used as the key to match on |
 | `$` / `$N` | Emit the matched key name N levels up as the value |
 | `#literal` | Emit the literal string `literal` as a constant value |
+| `\\` | Escape any of the characters above (`"\\@type"` matches the key `@type`) |
 
-**Spec tokens — output path:**
+**Spec tokens — output path (values):**
 
 | Token | Meaning |
 |-------|---------|
 | `literal` | Literal key name |
 | `&` / `&N` | Key matched N levels up (`&0` = current, `&1` = parent, …) |
 | `&(N,M)` | M-th wildcard capture group at N levels up |
-| `@(N,path)` | Value found at N levels up following dot-separated path |
-| `[]` suffix | Array-append: append value, or share a slot across fields |
+| `@(N,path)` | Value found at N levels up following a dot-separated path |
+| `[]` | Append a new array element |
+| `[N]` / `[&N]` / `[#N]` / `[@(N,path)]` | Write to an array index: literal, matched key, match count, or looked-up value |
+| `""` | Write to the output root |
+
+Values written to the same place are collected into a list.
 
 **Wildcard back-references:**
 
@@ -313,8 +330,8 @@ s.apply({"foo-bar": 42})  # → {"out": {"foo": {"bar": 42}}}
 **Array of objects:**
 
 ```python
-# Each "*" iteration creates one element; multiple fields share the same slot
-s = Shift({"items": {"*": {"id": "out[].id", "name": "out[].name"}}})
+# [&1] is the index matched one level up, so each item's fields share an element
+s = Shift({"items": {"*": {"id": "out[&1].id", "name": "out[&1].name"}}})
 s.apply({"items": [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]})
 # → {"out": [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]}
 ```
@@ -341,9 +358,18 @@ s = Shift({"*": {"$": "keys[]"}})
 s.apply({"foo": 1, "bar": 2})  # → {"keys": ["foo", "bar"]}
 
 # $1 writes the key matched one level up
-s = Shift({"sensors": {"*": {"value": "out[].v", "$1": "out[].section"}}})
+s = Shift({"sensors": {"*": {"value": "out.&1.v", "$1": "out.&1.section"}}})
 s.apply({"sensors": {"temp": {"value": 22}}})
-# → {"out": [{"v": 22, "section": "sensors"}]}
+# → {"out": {"temp": {"v": 22, "section": "sensors"}}}
+```
+
+**Value as key (`@` lookups):**
+
+```python
+# Turn [{"name": ..., "value": ...}] into {name: value}
+s = Shift({"*": {"value": "@(1,name)"}})
+s.apply([{"name": "color", "value": "red"}, {"name": "size", "value": "L"}])
+# → {"color": "red", "size": "L"}
 ```
 
 **Constant-as-value (`#literal`):**
@@ -361,7 +387,8 @@ s.apply({"foo": {}, "bar": {}})
 
 ### Default
 
-Fill in absent or `null` fields.
+Fill in absent or `null` fields. Keys are literals, `a|b` or `*`; literal keys
+are applied first, then `|` keys, then `*`.
 
 ```python
 from pyjolt.transforms import Default
@@ -371,10 +398,11 @@ d.apply({"name": "test"})
 # → {"name": "test", "status": "unknown", "meta": {"version": 1}}
 ```
 
-Apply a default to every element of an array:
+Apply a default to every element of an array. A key ending in `[]` marks an
+array; its children are indexes or `*`:
 
 ```python
-Default({"items": {"*": {"active": True}}}).apply(
+Default({"items[]": {"*": {"active": True}}}).apply(
     {"items": [{"name": "x"}, {"name": "y", "active": False}]}
 )
 # → {"items": [{"name": "x", "active": True}, {"name": "y", "active": False}]}
@@ -421,24 +449,42 @@ c.apply({"tags": "python", "primary": ["first", "second"]})
 # → {"tags": ["python"], "primary": "first"}
 ```
 
-### ModifyOverwrite / ModifyDefault
+### ModifyOverwrite / ModifyDefault / ModifyDefine
 
-Apply built-in functions to field values.
+Compute field values with functions. `"=fn"` applies `fn` to the current value;
+`"=fn(arg, ...)"` calls it with the given arguments, which are literals
+(`5`, `true`, `'quoted text'`), `@(N,path)` lookups into the input (`@(1,x)` is
+the sibling field `x`), or `^path` lookups into a context dict.
 
 ```python
 from pyjolt.transforms import ModifyOverwrite, ModifyDefault
 
-m = ModifyOverwrite({"score": "=toInteger", "label": "=toUpperCase"})
-m.apply({"score": "42", "label": "hello"})
-# → {"score": 42, "label": "HELLO"}
+m = ModifyOverwrite({
+    "score": "=toInteger",
+    "label": "=toUpper",
+    "full":  "=concat(@(1,first),' ',@(1,last))",
+})
+m.apply({"score": "42", "label": "hello", "first": "Ada", "last": "Lovelace"})
+# → {"score": 42, "label": "HELLO", "first": "Ada", "last": "Lovelace", "full": "Ada Lovelace"}
 ```
 
-`ModifyDefault` only touches fields that are absent:
+A list of alternatives uses the first one that produces a value. A function that
+can't produce a value (wrong types, missing lookup) leaves the field unchanged:
+
+```python
+ModifyOverwrite({"n": ["=toInteger", 0]}).apply({"n": "abc"})  # → {"n": 0}
+```
+
+`ModifyDefault` only touches fields that are missing or `null`; `ModifyDefine`
+only touches fields that don't exist:
 
 ```python
 m = ModifyDefault({"count": 0, "active": True})
 m.apply({"count": 5})  # → {"count": 5, "active": True}
 ```
+
+Prefix a key with `+`, `~` or `_` to overwrite / default / define just that key,
+and end it with `?` to apply only if the key exists.
 
 Apply a function to every element of an array:
 
@@ -449,39 +495,47 @@ ModifyOverwrite({"prices": {"*": {"amount": "=toDouble"}}}).apply(
 # → {"prices": [{"amount": 9.99}, {"amount": 4.49}]}
 ```
 
-**Built-in functions:**
+**Built-in functions** (the same set as JOLT):
 
 | Function | Description |
 |----------|-------------|
-| `=toInteger` / `=toLong` | Convert to `int` |
-| `=toDouble` / `=toFloat` | Convert to `float` |
-| `=toString` | Convert to `str` |
-| `=toBoolean` | Convert to `bool` |
-| `=trim` | Strip whitespace |
-| `=toUpperCase` / `=toLowerCase` | Change case |
-| `=abs` | Absolute value |
-| `=min(N)` / `=max(N)` | Clamp to min/max |
-| `=intSum(N)` / `=doubleSum(N)` / `=longSum(N)` / `=floatSum(N)` | Add N to value |
-| `=sum` | Sum all elements of a numeric list |
-| `=avg` | Average of a numeric list |
-| `=sqrt` | Square root |
-| `=not` | Boolean negation |
-| `=size` | Length of string/list |
-| `=concat(suffix)` | Append suffix to string value |
-| `=join(sep)` | Join list with separator |
-| `=split(sep)` | Split string by separator |
-| `=leftPad(width,char)` / `=rightPad(width,char)` | Pad string to width |
-| `=substring(start,end)` | Slice a string |
-| `=startsWith(prefix)` / `=endsWith(suffix)` | Predicate on string |
-| `=contains(item)` | True if item is in string or list |
-| `=squashNulls` | Remove `null` entries from list |
-| `=recursivelySquashNulls` | Recursively remove `null` entries |
-| `=toList` | Wrap value in a list if not already one |
-| `=firstElement` / `=lastElement` | First or last list element |
-| `=elementAt(N)` | Nth list element |
-| `=indexOf(item)` | Index of item in list/string |
-| `=coalesce(fallback,…)` | First non-null from value + args |
-| `=noop` | Identity (leave value unchanged) |
+| `=toInteger` / `=toLong` / `=toDouble` / `=toBoolean` / `=toString` | Type conversion (also element-wise on a list) |
+| `=toUpper` / `=toLower` / `=trim` | String case and whitespace |
+| `=concat(a,b,…)` | Join values as strings |
+| `=join(sep,list)` | Join non-empty values with a separator |
+| `=split(regex,string)` | Split a string |
+| `=substring(string,start,end)` | Slice a string |
+| `=leftPad(string,width,char)` / `=rightPad(…)` | Pad a string |
+| `=min(…)` / `=max(…)` / `=abs` / `=avg(…)` | Math on numbers or a list |
+| `=intSum(…)` / `=longSum(…)` / `=doubleSum(…)` | Sum |
+| `=intSubtract(a,b)` / `=longSubtract(a,b)` / `=doubleSubtract(a,b)` | Subtract |
+| `=divide(a,b)` / `=divideAndRound(digits,a,b)` | Divide |
+| `=size` | Length of a string, list or object |
+| `=firstElement` / `=lastElement` / `=elementAt(index,list)` | Pick from a list |
+| `=toList` / `=sort` | Wrap in a list / sort a list |
+| `=squashNulls` / `=recursivelySquashNulls` / `=squashDuplicates` | Clean up lists and objects |
+| `=isPresent` / `=notNull` / `=isNull` / `=noop` | Conditions, for use in a list of alternatives |
+
+pyjolt also provides `=toUpperCase` / `=toLowerCase` / `=toFloat` / `=floatSum`
+(aliases), `=sum(…)`, `=sqrt`, `=not`, `=coalesce(…)`, and
+`=startsWith(string,prefix)` / `=endsWith(string,suffix)` /
+`=contains(source,item)` / `=indexOf(source,item)`.
+
+**Custom functions and context:**
+
+```python
+from pyjolt import MISSING, ModifyOverwrite
+
+def initials(name):
+    return "".join(part[0] for part in name.split()) if isinstance(name, str) else MISSING
+
+m = ModifyOverwrite(
+    {"initials": "=initials(@(1,name))", "currency": "^defaults.currency"},
+    functions={"initials": initials},
+)
+m.apply({"name": "Ada Lovelace"}, context={"defaults": {"currency": "EUR"}})
+# → {"name": "Ada Lovelace", "initials": "AL", "currency": "EUR"}
+```
 
 ### Chainr
 
@@ -500,6 +554,10 @@ chain.apply({"score": "3.14"})  # → {"score": 3.14}
 chain.apply({})                  # → {"score": 0.0}
 ```
 
+`Chainr.apply(data, context={...})` passes the context to modify steps.
+Operation names from JOLT (including Java class names such as
+`com.bazaarvoice.jolt.Shiftr`) are accepted, so specs can be copied over as-is.
+
 Compose transform instances directly:
 
 ```python
@@ -509,6 +567,15 @@ from pyjolt.transforms import Shift, Sort
 chain = Chainr([Shift({"b": "b", "a": "a"}), Sort()])
 chain.apply({"b": 2, "a": 1})  # → {"a": 1, "b": 2}  (sorted)
 ```
+
+## Upgrading from 1.x
+
+2.0 makes every transform behave like reference JOLT. Specs written for JOLT
+(or the demo site) now give identical results, but some 1.x-only behaviour
+changed — most notably `out[].field` no longer groups fields from the same
+parent into one element (use `out[&1].field`), and `=fn(args)` no longer
+receives the current value implicitly (use `@(1,key)`). See the
+[changelog](CHANGELOG.md#200--2026-10-02) for the full list.
 
 ## Contributing
 

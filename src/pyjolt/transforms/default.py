@@ -14,104 +14,202 @@
 
 """Default transform — fill in missing or null values.
 
-The spec mirrors the target JSON structure.  For every key in the spec:
+A port of the reference ``Defaultr``. The spec mirrors the shape of the
+output. For each spec key, if the input value there is missing or ``null`` the
+spec value is written; if the spec value is an object, defaulting continues
+inside it.
 
-* If the key is absent in the input, add it with the spec value.
-* If the key is present but its value is ``None``, replace it with the spec
-  value.
-* If the spec value is a **dict**, descend recursively.
+Keys
+    ``literal``, ``a|b`` (each of the listed keys that exists), ``*`` (every
+    existing key). Literal keys are applied first, then ``|`` keys (fewest
+    alternatives first), then ``*``.
 
-Wildcard keys (``*``) apply defaults to every key at that level that has no
-more-specific override.
+Arrays
+    A key ending in ``[]`` (e.g. ``"photos[]"``) says the value is an array;
+    its children are then indexes (``"0"``, ``"1|2"``) or ``*``.
 """
 
 from __future__ import annotations
 
-import copy
 from typing import Any
 
-from ..exceptions import SpecError
+from .._common.util import deep_copy, parse_int
+from ..exceptions import SpecError, TransformError
 from .base import Transform
 
+_LITERAL, _OR, _STAR = range(3)
 
-def _apply_defaults(data: Any, spec: Any) -> Any:
-    """Return *data* with defaults from *spec* applied (non-destructive)."""
-    if not isinstance(spec, dict):
-        # Leaf spec value — used as-is by callers
-        return data
 
-    if not isinstance(data, dict):
-        return data
+class _NotAnIndex(SpecError):
+    pass
 
-    result = dict(data)
-    wildcard_spec = spec.get("*")
 
-    for key, spec_val in spec.items():
-        if key == "*":
-            continue
+def _parse_op(key: str) -> int:
+    if "*" in key:
+        if key != "*":
+            raise SpecError(
+                f"Defaultr key {key} is invalid.  * keys can only contain *, and no other characters."
+            )
+        return _STAR
+    if "|" in key:
+        return _OR
+    return _LITERAL
 
-        if isinstance(spec_val, dict):
-            if key not in result or result[key] is None:
-                result[key] = _apply_defaults({}, spec_val)
-            elif isinstance(result[key], dict):
-                result[key] = _apply_defaults(result[key], spec_val)
-            elif isinstance(result[key], list):
-                # When the spec_val has a wildcard, apply its sub-spec to each
-                # list element (e.g. {"repos": {"*": {"language": "unknown"}}}).
-                wildcard = spec_val.get("*")
-                if isinstance(wildcard, dict):
-                    result[key] = [_apply_defaults(item, wildcard) for item in result[key]]
-                else:
-                    result[key] = [_apply_defaults(item, spec_val) for item in result[key]]
+
+def _to_index(s: str) -> int:
+    try:
+        return parse_int(s)
+    except ValueError:
+        raise _NotAnIndex(f"Defaultr array key {s!r} is not an integer") from None
+
+
+class _Key:
+    __slots__ = (
+        "raw_key",
+        "is_array_output",
+        "op",
+        "key_strings",
+        "children",
+        "literal_value",
+        "output_array_size",
+        "parent_is_array",
+        "key_ints",
+        "key_int",
+    )
+
+    def __init__(self, raw_json_key: str, spec: Any, parent_is_array: bool) -> None:
+        raw = raw_json_key
+        self.is_array_output = raw.endswith("[]")
+        if self.is_array_output:
+            raw = raw.replace("[]", "")
+        self.raw_key = raw
+        self.parent_is_array = parent_is_array
+        self.op = _parse_op(raw)
+        if self.op == _OR:
+            self.key_strings = raw.split("|")
+        elif self.op == _LITERAL:
+            self.key_strings = [raw]
         else:
-            if key not in result or result[key] is None:
-                result[key] = copy.deepcopy(spec_val)
+            self.key_strings = []
 
-    # Apply wildcard defaults to every key that has no specific spec entry
-    if wildcard_spec is not None:
-        for key in list(result.keys()):
-            if key in spec:
-                continue
-            if isinstance(wildcard_spec, dict):
-                if result[key] is None or not isinstance(result[key], dict):
-                    pass  # cannot descend into non-dict
-                else:
-                    result[key] = _apply_defaults(result[key], wildcard_spec)
-            else:
-                if result[key] is None:
-                    result[key] = copy.deepcopy(wildcard_spec)
+        self.key_int = -1
+        self.key_ints: list[int] = []
+        if parent_is_array:
+            if self.op == _OR:
+                self.key_ints = [_to_index(s) for s in self.key_strings]
+            elif self.op == _LITERAL:
+                self.key_int = _to_index(raw)
+                self.key_ints = [self.key_int]
 
-    return result
+        self.children: list[_Key] | None = None
+        self.literal_value: Any = None
+        self.output_array_size = -1
+        if isinstance(spec, dict):
+            children = [_Key(k, v, self.is_array_output) for k, v in spec.items()]
+            children.sort(key=_precedence)
+            self.children = children
+            if self.is_array_output:
+                for child in children:
+                    self.output_array_size = max(self.output_array_size, child.key_int)
+        else:
+            self.literal_value = spec
+
+    @property
+    def or_count(self) -> int:
+        return len(self.key_strings) if self.op == _OR else 0
+
+    def new_container(self) -> Any:
+        return [] if self.is_array_output else {}
+
+    def apply_children(self, defaultee: Any) -> None:
+        if defaultee is None:
+            raise TransformError("Defaultee should never be null when passed to applyChildren.")
+        if self.children is None:
+            return
+        if self.is_array_output and isinstance(defaultee, list):
+            while len(defaultee) <= self.output_array_size:
+                defaultee.append(None)
+        for child in self.children:
+            child.apply_child(defaultee)
+
+    def apply_child(self, container: Any) -> None:
+        if self.parent_is_array:
+            if isinstance(container, list):
+                for index in self._matching_indexes(container):
+                    self._apply_at(container, index)
+        elif isinstance(container, dict):
+            for key in self._matching_keys(container):
+                self._apply_at(container, key)
+
+    def _matching_keys(self, container: dict[str, Any]) -> list[str]:
+        if self.op == _LITERAL:
+            return self.key_strings
+        if self.op == _STAR:
+            return list(container)
+        return [k for k in self.key_strings if k in container]
+
+    def _matching_indexes(self, container: list[Any]) -> list[int]:
+        if self.op == _LITERAL:
+            return self.key_ints
+        if self.op == _STAR:
+            return list(range(len(container)))
+        return [i for i in self.key_ints if i < len(container)]
+
+    def _apply_at(self, container: Any, key: Any) -> None:
+        if isinstance(container, list):
+            if not 0 <= key < len(container):
+                return
+            value = container[key]
+        else:
+            value = container.get(key)
+        if self.children is None:
+            if value is None:
+                container[key] = deep_copy(self.literal_value)
+        else:
+            if value is None:
+                value = self.new_container()
+                container[key] = value
+            self.apply_children(value)
+
+
+def _precedence(key: _Key) -> tuple[int, int, str]:
+    if key.op == _OR:
+        return 1, key.or_count, key.raw_key
+    return (0 if key.op == _LITERAL else 2), 0, ""
 
 
 class Default(Transform):
-    """Apply default values to absent or null fields.
+    """Fill in missing or ``null`` values from the spec.
 
-    Parameters
-    ----------
-    spec:
-        A dict whose structure mirrors the desired output.  Leaf values are
-        used as defaults.  Nested dicts trigger recursive default-filling.
+    Example::
 
-    Examples
-    --------
-    >>> d = Default({"status": "unknown", "meta": {"version": 1}})
-    >>> d.apply({"name": "test"})
-    {'name': 'test', 'status': 'unknown', 'meta': {'version': 1}}
-    >>> d.apply({"name": "test", "status": "active"})
-    {'name': 'test', 'status': 'active', 'meta': {'version': 1}}
+        Default({"status": "active", "tags": []}).apply({"name": "Ana", "status": None})
+        # -> {"name": "Ana", "status": "active", "tags": []}
     """
 
-    __slots__ = ("_spec",)
+    __slots__ = ("_map_root", "_array_root")
 
     def __init__(self, spec: dict[str, Any]) -> None:
         if not isinstance(spec, dict):
-            raise SpecError(f"Default spec must be a dict, got {type(spec).__name__!r}")
-        self._spec = spec
+            raise SpecError(f"Default expected a spec of Map type, got {type(spec).__name__}")
+        self._map_root = _Key("root", spec, parent_is_array=False)
+        try:
+            self._array_root: _Key | None = _Key("root[]", spec, parent_is_array=False)
+        except _NotAnIndex:
+            self._array_root = None
 
     def apply(self, input_data: Any) -> Any:
-        if isinstance(input_data, dict):
-            return _apply_defaults(input_data, self._spec)
-        if isinstance(input_data, list):
-            return [_apply_defaults(item, self._spec) for item in input_data]
-        return input_data
+        return self._apply_owned(deep_copy(input_data))
+
+    def _apply_owned(self, data: Any, context: dict[str, Any] | None = None) -> Any:
+        if data is None:
+            data = {}
+        if isinstance(data, list):
+            if self._array_root is None:
+                raise TransformError(
+                    "The Spec provided can not handle input that is a top level Json Array."
+                )
+            self._array_root.apply_children(data)
+        else:
+            self._map_root.apply_children(data)
+        return data

@@ -14,9 +14,9 @@
 
 """Sort transform — sort all dict keys alphabetically (recursively).
 
-No spec is needed (pass an empty dict ``{}``).  The transform recursively
-sorts every mapping in the data tree.  Lists retain their original order but
-their elements are recursively sorted.
+A port of the reference ``Sortr``. No spec is needed (pass ``{}``). Every
+object in the tree gets its keys sorted, with keys starting with ``~`` first;
+lists keep their order but their elements are sorted recursively.
 """
 
 from __future__ import annotations
@@ -26,9 +26,14 @@ from typing import Any
 from .base import Transform
 
 
+def _key_order(key: str) -> tuple[bool, bytes]:
+    # "~" keys first, then Java String.compareTo order (UTF-16 code units).
+    return not key.startswith("~"), key.encode("utf-16-be", "surrogatepass")
+
+
 def _sort_recursive(val: Any) -> Any:
     if isinstance(val, dict):
-        return {k: _sort_recursive(val[k]) for k in sorted(val)}
+        return {k: _sort_recursive(val[k]) for k in sorted(val, key=_key_order)}
     if isinstance(val, list):
         return [_sort_recursive(item) for item in val]
     return val
@@ -56,3 +61,6 @@ class Sort(Transform):
 
     def apply(self, input_data: Any) -> Any:
         return _sort_recursive(input_data)
+
+    def _apply_owned(self, data: Any, context: dict[str, Any] | None = None) -> Any:
+        return _sort_recursive(data)

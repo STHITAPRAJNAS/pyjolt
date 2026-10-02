@@ -38,3 +38,12 @@ class Transform(ABC):
             A new JSON-compatible Python object (the transform never mutates
             its input).
         """
+
+    def _apply_owned(self, data: Any, context: dict[str, Any] | None = None) -> Any:
+        """Transform *data* that the caller owns and allows to be modified in place.
+
+        :class:`~pyjolt.Chainr` copies its input once and then passes it through
+        every step with this method, avoiding a copy per step. Built-in
+        transforms override it; custom transforms get the safe default.
+        """
+        return self.apply(data)

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from pyjolt.exceptions import SpecError
 from pyjolt.transforms import Shift
 
 # ---------------------------------------------------------------------------
@@ -30,8 +33,9 @@ class TestLiteralKeys:
         spec = {"a": {"b": {"c": "x.y.z"}}}
         assert shift(spec, {"a": {"b": {"c": "deep"}}}) == {"x": {"y": {"z": "deep"}}}
 
-    def test_missing_key_produces_empty(self):
-        assert shift({"a": "b"}, {"x": 1}) == {}
+    def test_missing_key_produces_none(self):
+        # Like reference JOLT, nothing matched means a null result.
+        assert shift({"a": "b"}, {"x": 1}) is None
 
     def test_multiple_keys(self):
         spec = {"first": "name", "last": "surname"}
@@ -247,9 +251,9 @@ class TestAtOutputReference:
         spec = {"items": {"*": {"id": "out.@(0,label)"}}}
         data = {"items": {"alpha": {"id": 10, "label": "typeB"}}}
         result = shift(spec, data)
-        # @(0,...) → ctx[-1].input_val = 10 (scalar), "label" not in 10 → empty
-        # This is an edge case; just verify it runs without error
-        assert isinstance(result, dict)
+        # @(0,label) looks inside the current value (10), which has no "label",
+        # so the output path can't be built and nothing is written.
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -258,10 +262,12 @@ class TestAtOutputReference:
 
 
 class TestHashLiteral:
-    def test_hash_produces_literal_key(self):
-        spec = {"value": "#constant"}
-        result = shift(spec, {"value": 42})
-        assert "constant" in result
+    def test_hash_is_not_valid_in_output_path(self):
+        with pytest.raises(SpecError):
+            shift({"value": "#constant"}, {"value": 42})
+
+    def test_hash_key_writes_constant(self):
+        assert shift({"value": {"#constant": "out"}}, {"value": 42}) == {"out": "constant"}
 
 
 # ---------------------------------------------------------------------------
@@ -271,16 +277,25 @@ class TestHashLiteral:
 
 class TestEdgeCases:
     def test_empty_input(self):
-        assert shift({"a": "b"}, {}) == {}
+        assert shift({"a": "b"}, {}) is None
 
-    def test_empty_spec(self):
-        assert shift({}, {"a": 1}) == {}
+    def test_empty_spec_raises(self):
+        with pytest.raises(SpecError):
+            shift({}, {"a": 1})
 
     def test_null_input(self):
-        assert shift({"a": "b"}, None) == {}
+        assert shift({"a": "b"}, None) is None
 
     def test_scalar_input(self):
-        assert shift({"a": "b"}, 42) == {}
+        assert shift({"a": "b"}, 42) is None
+
+    def test_scalar_input_matched_by_value(self):
+        assert shift({"42": {"#yes": "matched"}}, 42) == {"matched": "yes"}
+
+    def test_input_is_not_mutated(self):
+        data = {"a": [1], "b": 2}
+        shift({"a": "x", "b": "x"}, data)
+        assert data == {"a": [1], "b": 2}
 
     def test_numeric_keys_in_spec(self):
         # Integer keys as strings

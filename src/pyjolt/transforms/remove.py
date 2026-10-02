@@ -12,95 +12,157 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Remove transform — delete keys from JSON.
+"""Remove transform — delete keys from the input.
 
-The spec mirrors the input structure.  A leaf value of any non-dict type
-(string, number, ``True``, ``""`` …) means *remove that key*.  A dict value
-means *descend and remove the nested keys*.
+A port of the reference ``Removr``. The spec mirrors the shape of the input;
+a leaf value of ``""`` removes the matching key (or array index).
 
-The wildcard key ``*`` removes every key at that level (or every element of
-a list).
+Keys
+    ``literal``, ``a|b``, and ``*`` wildcards (``"*"``, ``"tag-*"``,
+    ``"*-x-*"``). In arrays, use an index (``"0"``) or ``"*"``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from .._common.paths import (
+    LiteralPathElement,
+    PathElement,
+    StarAllPathElement,
+    StarDoublePathElement,
+    StarPathElement,
+    StarRegexPathElement,
+    StarSinglePathElement,
+)
+from .._common.util import count_matches, deep_copy, try_parse_int
 from ..exceptions import SpecError
 from .base import Transform
 
 
-def _apply_remove(data: Any, spec: Any) -> Any:
-    """Return a copy of *data* with keys specified in *spec* removed."""
-    if not isinstance(spec, dict):
-        return data  # leaf spec reached without a dict input — leave as-is
+def _parse(key: str) -> PathElement:
+    if key == "*":
+        return StarAllPathElement(key)
+    stars = count_matches(key, "*")
+    if stars == 1:
+        return StarSinglePathElement(key)
+    if stars == 2:
+        return StarDoublePathElement(key)
+    if stars > 2:
+        return StarRegexPathElement(key)
+    return LiteralPathElement(key)
 
-    if isinstance(data, dict):
-        result: dict[str, Any] = {}
-        wildcard = spec.get("*")
 
-        for key, val in data.items():
-            key_spec = spec.get(key)
+class _Spec:
+    __slots__ = ("path_element",)
 
-            if key_spec is None and wildcard is None:
-                # Nothing in the spec for this key — keep it
-                result[key] = val
-                continue
+    def __init__(self, key: str) -> None:
+        self.path_element = _parse(key)
 
-            # Determine effective spec for this key
-            effective = key_spec if key_spec is not None else wildcard
+    def _index(self) -> int | None:
+        n = try_parse_int(self.path_element.raw_key)
+        return n if n is not None and n >= 0 else None
 
-            if isinstance(effective, dict):
-                # Recurse into the nested structure
-                result[key] = _apply_remove(val, effective)
-            else:
-                # Non-dict spec value means "remove this key" — omit from result
-                pass  # skip — key is removed
+    def apply_to_map(self, data: dict[str, Any]) -> list[str]:
+        raise NotImplementedError
 
-        return result
+    def apply_to_list(self, data: list[Any]) -> list[int]:
+        raise NotImplementedError
 
-    if isinstance(data, list):
-        # Apply the spec to each list element
-        wildcard = spec.get("*")
-        if wildcard is not None and isinstance(wildcard, dict):
-            return [_apply_remove(item, wildcard) for item in data]
-        if wildcard is not None:
-            # Scalar wildcard value means "remove all elements"
-            return []
-        return data
 
-    return data
+class _LeafSpec(_Spec):
+    __slots__ = ()
+
+    def apply_to_map(self, data: dict[str, Any]) -> list[str]:
+        pe = self.path_element
+        if isinstance(pe, LiteralPathElement):
+            return [pe.raw_key] if pe.raw_key in data else []
+        assert isinstance(pe, StarPathElement)
+        return [k for k in data if pe.string_match(k)]
+
+    def apply_to_list(self, data: list[Any]) -> list[int]:
+        pe = self.path_element
+        if isinstance(pe, LiteralPathElement):
+            idx = self._index()
+            return [idx] if idx is not None and idx < len(data) else []
+        if isinstance(pe, StarAllPathElement):
+            return list(range(len(data)))
+        return []
+
+
+class _CompositeSpec(_Spec):
+    __slots__ = ("children",)
+
+    def __init__(self, key: str, spec: dict[str, Any]) -> None:
+        super().__init__(key)
+        children: list[_Spec] = []
+        for raw_lhs, raw_rhs in spec.items():
+            for k in str(raw_lhs).split("|"):
+                if isinstance(raw_rhs, dict):
+                    children.append(_CompositeSpec(k, raw_rhs))
+                elif isinstance(raw_rhs, str) and raw_rhs.strip() == "":
+                    children.append(_LeafSpec(k))
+                else:
+                    raise SpecError("Invalid Removr spec RHS. Should be an empty string or Map")
+        self.children = children
+
+    def apply_to_map(self, data: dict[str, Any]) -> list[str]:
+        pe = self.path_element
+        if isinstance(pe, LiteralPathElement):
+            self._process_children(data.get(pe.raw_key))
+        else:
+            assert isinstance(pe, StarPathElement)
+            for key, value in list(data.items()):
+                if pe.string_match(key):
+                    self._process_children(value)
+        return []
+
+    def apply_to_list(self, data: list[Any]) -> list[int]:
+        pe = self.path_element
+        if isinstance(pe, LiteralPathElement):
+            idx = self._index()
+            if idx is not None and idx < len(data):
+                self._process_children(data[idx])
+        elif isinstance(pe, StarAllPathElement):
+            for item in data:
+                self._process_children(item)
+        return []
+
+    def _process_children(self, sub: Any) -> None:
+        if isinstance(sub, list):
+            indexes: set[int] = set()
+            for child in self.children:
+                indexes.update(child.apply_to_list(sub))
+            for i in sorted(indexes, reverse=True):
+                del sub[i]
+        elif isinstance(sub, dict):
+            keys: list[str] = []
+            for child in self.children:
+                keys.extend(child.apply_to_map(sub))
+            for k in keys:
+                sub.pop(k, None)
 
 
 class Remove(Transform):
-    """Delete keys/fields from a JSON object.
+    """Delete the keys named in the spec.
 
-    Parameters
-    ----------
-    spec:
-        A dict whose keys name the fields to remove.  A non-dict leaf value
-        (``""``, ``True``, etc.) signals removal; a dict value triggers
-        recursive removal of its children.
+    Example::
 
-    Examples
-    --------
-    >>> r = Remove({"secret": "", "meta": {"internal": ""}})
-    >>> r.apply({"name": "alice", "secret": "xyz", "meta": {"internal": 1, "v": 2}})
-    {'name': 'alice', 'meta': {'v': 2}}
-
-    Remove all keys with wildcard::
-
-        r = Remove({"*": ""})
-        r.apply({"a": 1, "b": 2})
-        # -> {}
+        Remove({"password": "", "meta": {"*": ""}}).apply(
+            {"user": "ana", "password": "x", "meta": {"a": 1}}
+        )  # -> {"user": "ana", "meta": {}}
     """
 
-    __slots__ = ("_spec",)
+    __slots__ = ("_root",)
 
     def __init__(self, spec: dict[str, Any]) -> None:
         if not isinstance(spec, dict):
-            raise SpecError(f"Remove spec must be a dict, got {type(spec).__name__!r}")
-        self._spec = spec
+            raise SpecError(f"Remove expected a spec of Map type, got {type(spec).__name__}")
+        self._root = _CompositeSpec("root", spec)
 
     def apply(self, input_data: Any) -> Any:
-        return _apply_remove(input_data, self._spec)
+        return self._apply_owned(deep_copy(input_data))
+
+    def _apply_owned(self, data: Any, context: dict[str, Any] | None = None) -> Any:
+        self._root.apply_to_map({"root": data})
+        return data

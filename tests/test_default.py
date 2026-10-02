@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from pyjolt.exceptions import TransformError
 from pyjolt.transforms import Default
 
 
@@ -45,9 +48,23 @@ class TestDefault:
         assert result["x"]["y"]["z"] == 42
 
     def test_list_input_applies_to_each_element(self):
-        result = Default({"flag": False}).apply([{"a": 1}, {"a": 2, "flag": True}])
+        result = Default({"*": {"flag": False}}).apply([{"a": 1}, {"a": 2, "flag": True}])
         assert result[0] == {"a": 1, "flag": False}
         assert result[1] == {"a": 2, "flag": True}
+
+    def test_list_input_needs_an_index_or_star_spec(self):
+        with pytest.raises(TransformError):
+            Default({"flag": False}).apply([{"a": 1}])
+
+    def test_nested_array_uses_brackets(self):
+        spec = {"photos[]": {"*": {"caption": "none"}}}
+        result = Default(spec).apply({"photos": [{"url": "a"}, {"url": "b", "caption": "x"}]})
+        assert result == {"photos": [{"url": "a", "caption": "none"}, {"url": "b", "caption": "x"}]}
+
+    def test_input_is_not_mutated(self):
+        data = {"a": None}
+        Default({"a": 1}).apply(data)
+        assert data == {"a": None}
 
     def test_wildcard_applies_to_all_keys(self):
         spec = {"*": {"active": True}}
