@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jolt-py"
-version = "1.2.2"
+version = "2.0.0"
 description = "Python JOLT library for declarative JSON-to-JSON transformation, ETL pipelines, and data mapping — pure-Python port of the Java JOLT library"
 readme = "README.md"
 requires-python = ">=3.10"

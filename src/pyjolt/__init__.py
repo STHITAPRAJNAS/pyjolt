@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""pyjolt — high-performance Python implementation of the JOLT JSON transformation library.
+"""pyjolt — a JOLT-compatible JSON-to-JSON transformation library for Python.
 
 Quick start
 -----------
@@ -32,12 +32,14 @@ Individual transforms can also be used directly::
 
 from importlib.metadata import PackageNotFoundError, version
 
+from ._common.util import MISSING
 from .chainr import Chainr
 from .exceptions import PyJoltError, SpecError, TransformError
 from .transforms import (
     Cardinality,
     Default,
     ModifyDefault,
+    ModifyDefine,
     ModifyOverwrite,
     Remove,
     Shift,
@@ -57,10 +59,13 @@ __all__ = [
     "Cardinality",
     "ModifyOverwrite",
     "ModifyDefault",
+    "ModifyDefine",
     # Exceptions
     "PyJoltError",
     "SpecError",
     "TransformError",
+    # Custom modify functions return this for "no value"
+    "MISSING",
     # Version
     "__version__",
 ]

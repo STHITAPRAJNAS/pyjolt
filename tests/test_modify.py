@@ -63,8 +63,9 @@ class TestToBoolean:
     def test_bool_passthrough(self):
         assert overwrite({"flag": "=toBoolean"}, {"flag": True}) == {"flag": True}
 
-    def test_one_is_true(self):
-        assert overwrite({"flag": "=toBoolean"}, {"flag": "1"}) == {"flag": True}
+    def test_only_true_and_false_strings_convert(self):
+        # Like reference JOLT, other values (e.g. "1") produce no value: left unchanged.
+        assert overwrite({"flag": "=toBoolean"}, {"flag": "1"}) == {"flag": "1"}
 
 
 # ---------------------------------------------------------------------------
@@ -83,17 +84,25 @@ class TestStringFunctions:
         assert overwrite({"s": "=toLowerCase"}, {"s": "HELLO"}) == {"s": "hello"}
 
     def test_split(self):
-        result = overwrite({"s": "=split(|)"}, {"s": "a|b|c"})
+        # split(separator-regex, source); the current value is referenced with @(1,key)
+        result = overwrite({"s": "=split('-',@(1,s))"}, {"s": "a-b-c"})
+        assert result == {"s": ["a", "b", "c"]}
+
+    def test_split_separator_is_a_regex(self):
+        result = overwrite({"s": "=split('[,;]',@(1,s))"}, {"s": "a,b;c"})
         assert result == {"s": ["a", "b", "c"]}
 
     def test_join(self):
-        result = overwrite({"s": "=join(-)"}, {"s": ["a", "b", "c"]})
+        result = overwrite({"s": "=join('-',@(1,s))"}, {"s": ["a", "b", "c"]})
         assert result == {"s": "a-b-c"}
 
     def test_concat(self):
-        # concat(current_value, *extra_args) — all joined as strings
-        result = overwrite({"s": "=concat(-suffix)"}, {"s": "hello"})
+        result = overwrite({"s": "=concat(@(1,s),'-suffix')"}, {"s": "hello"})
         assert result == {"s": "hello-suffix"}
+
+    def test_concat_only_uses_its_arguments(self):
+        result = overwrite({"s": "=concat('a','b')"}, {"s": "hello"})
+        assert result == {"s": "ab"}
 
 
 # ---------------------------------------------------------------------------
@@ -109,19 +118,22 @@ class TestNumericFunctions:
         assert overwrite({"n": "=abs"}, {"n": -5}) == {"n": 5}
 
     def test_min(self):
-        assert overwrite({"n": "=min(10)"}, {"n": 3}) == {"n": 3}
-        assert overwrite({"n": "=min(10)"}, {"n": 15}) == {"n": 10}
+        assert overwrite({"n": "=min(@(1,n),10)"}, {"n": 3}) == {"n": 3}
+        assert overwrite({"n": "=min(@(1,n),10)"}, {"n": 15}) == {"n": 10}
 
     def test_max(self):
-        assert overwrite({"n": "=max(5)"}, {"n": 3}) == {"n": 5}
-        assert overwrite({"n": "=max(5)"}, {"n": 8}) == {"n": 8}
+        assert overwrite({"n": "=max(@(1,n),5)"}, {"n": 3}) == {"n": 5}
+        assert overwrite({"n": "=max(@(1,n),5)"}, {"n": 8}) == {"n": 8}
+
+    def test_min_of_list(self):
+        assert overwrite({"n": "=min"}, {"n": [4, 2, 9]}) == {"n": 2}
 
     def test_int_sum(self):
-        assert overwrite({"n": "=intSum(10)"}, {"n": 5}) == {"n": 15}
+        assert overwrite({"n": "=intSum(@(1,n),10)"}, {"n": 5}) == {"n": 15}
 
     def test_double_sum(self):
-        result = overwrite({"n": "=doubleSum(0.5)"}, {"n": 1.5})
-        assert abs(result["n"] - 2.0) < 1e-9
+        result = overwrite({"n": "=doubleSum(@(1,n),0.5)"}, {"n": 1.5})
+        assert result == {"n": 2.0}
 
     def test_size_string(self):
         assert overwrite({"s": "=size"}, {"s": "hello"}) == {"s": 5}
@@ -216,12 +228,22 @@ class TestWildcard:
 
 
 class TestEdgeCases:
-    def test_unknown_function_raises(self):
-        with pytest.raises(SpecError, match="Unknown modify function"):
-            overwrite({"x": "=nonExistentFn"}, {"x": 1})
+    def test_unknown_function_warns_and_produces_no_value(self):
+        with pytest.warns(UserWarning, match="Unknown modify function"):
+            result = overwrite({"x": "=nonExistentFn"}, {"x": 1})
+        assert result == {"x": 1}
 
-    def test_list_input_each_element_modified(self):
-        result = ModifyOverwrite({"n": "=toInteger"}).apply([{"n": "1"}, {"n": "2"}])
+    def test_unknown_function_falls_through_to_next_alternative(self):
+        with pytest.warns(UserWarning):
+            result = overwrite({"x": ["=nonExistentFn", "fallback"]}, {"x": 1})
+        assert result == {"x": "fallback"}
+
+    def test_invalid_spec_raises(self):
+        with pytest.raises(SpecError):
+            ModifyOverwrite({"x": {"[0]": 1, "a": 2}})  # mixes array index and map key
+
+    def test_list_input_needs_star(self):
+        result = ModifyOverwrite({"*": {"n": "=toInteger"}}).apply([{"n": "1"}, {"n": "2"}])
         assert result == [{"n": 1}, {"n": 2}]
 
     def test_non_dict_passthrough(self):

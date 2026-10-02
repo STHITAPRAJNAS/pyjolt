@@ -25,6 +25,7 @@ from pyjolt.transforms import (
     Cardinality,
     Default,
     ModifyDefault,
+    ModifyDefine,
     ModifyOverwrite,
     Remove,
     Shift,
@@ -163,10 +164,10 @@ _SPECIAL = {
 }
 
 # Modifier fixtures carry one expected output per flavour of the transform.
-_MODIFIERS: dict[str, Callable[[Any], Any] | None] = {
+_MODIFIERS: dict[str, Any] = {
     "OVERWRITR": ModifyOverwrite,
     "DEFAULTR": ModifyDefault,
-    "DEFINR": None,  # modify-define-beta is not implemented in pyjolt
+    "DEFINR": ModifyDefine,
 }
 
 # Function fixtures in the Java suite are only checked for one flavour.
@@ -202,19 +203,7 @@ def _modifier_cases() -> list[Any]:
         else:
             flavours = [k for k in _MODIFIERS if k in unit]
         for flavour in flavours:
-            case_id = f"{rel.removesuffix('.json')}[{flavour}]"
-            if _MODIFIERS[flavour] is None:
-                cases.append(
-                    pytest.param(
-                        case_id,
-                        rel,
-                        flavour,
-                        id=case_id,
-                        marks=pytest.mark.skip(reason="modify-define-beta not implemented"),
-                    )
-                )
-            else:
-                cases.append(_case(case_id, rel, flavour))
+            cases.append(_case(f"{rel.removesuffix('.json')}[{flavour}]", rel, flavour))
     return cases
 
 
@@ -237,12 +226,28 @@ def test_transform(case_id: str, folder: str, rel: str) -> None:
     assert_same(unit["expected"], actual)
 
 
+def _label_computation(pick: Callable[..., int]) -> Callable[..., Any]:
+    # Custom functions registered by the reference test suite (ModifierTest.java).
+    def fn(*args: Any) -> Any:
+        labels = args[0]
+        keys = [int(k) for k in labels if k.lstrip("-").isdigit()]
+        return labels.get(str(pick(keys)))
+
+    return fn
+
+
+_TEST_FUNCTIONS = {
+    "minLabelComputation": _label_computation(min),
+    "maxLabelComputation": _label_computation(max),
+}
+
+
+@pytest.mark.filterwarnings("ignore:Unknown modify function")
 @pytest.mark.parametrize(("case_id", "rel", "flavour"), _modifier_cases())
 def test_modifier(case_id: str, rel: str, flavour: str) -> None:
     unit = load(rel)
-    transform = _MODIFIERS[flavour]
-    assert transform is not None
-    actual = transform(unit["spec"]).apply(unit["input"])
+    transform = _MODIFIERS[flavour](unit["spec"], functions=_TEST_FUNCTIONS)
+    actual = transform.apply(unit["input"], unit.get("context"))
     stem = Path(rel).stem
     assert_same(unit[flavour], actual, ignore_order=stem not in _ORDERED_MODIFIER_CASES)
 

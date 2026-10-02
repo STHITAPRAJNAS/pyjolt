@@ -39,9 +39,9 @@ class TestCardinalityMany:
         result = cardinality({"tags": "MANY"}, {"tags": ["a", "b"]})
         assert result == {"tags": ["a", "b"]}
 
-    def test_none_wrapped_in_list(self):
+    def test_none_becomes_empty_list(self):
         result = cardinality({"x": "MANY"}, {"x": None})
-        assert result == {"x": [None]}
+        assert result == {"x": []}
 
 
 class TestCardinalityMixed:
@@ -67,21 +67,17 @@ class TestCardinalityMixed:
 
 
 class TestCardinalityEdgeCases:
-    def test_case_insensitive_one(self):
-        result = cardinality({"x": "one"}, {"x": [1, 2]})
-        assert result == {"x": 1}
-
-    def test_case_insensitive_many(self):
-        result = cardinality({"x": "many"}, {"x": 5})
-        assert result == {"x": [5]}
+    def test_mode_is_case_sensitive(self):
+        with pytest.raises(SpecError):
+            cardinality({"x": "one"}, {"x": [1, 2]})
 
     def test_invalid_mode_raises(self):
         with pytest.raises(SpecError):
             cardinality({"x": "INVALID"}, {"x": 1})
 
-    def test_empty_spec(self):
-        data = {"a": [1, 2], "b": "hello"}
-        assert cardinality({}, data) == data
+    def test_empty_spec_raises(self):
+        with pytest.raises(SpecError):
+            cardinality({}, {"a": [1, 2]})
 
     def test_list_input_applies_to_each_element(self):
         spec = {"*": {"val": "ONE"}}

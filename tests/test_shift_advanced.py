@@ -33,7 +33,7 @@ class TestDollarKeyAsValue:
     def test_dollar_alongside_regular_shift(self):
         """$ and regular field moves can coexist at the same spec level."""
         result = shift(
-            {"items": {"*": {"name": "out[].name", "$": "out[].key"}}},
+            {"items": {"*": {"name": "out[&1].name", "$": "out[&1].key"}}},
             {"items": [{"name": "Alice"}, {"name": "Bob"}]},
         )
         elements = result["out"]
@@ -75,7 +75,7 @@ class TestHashConstantAsValue:
     def test_hash_alongside_data_fields(self):
         """#type and regular field moves coexist."""
         result = shift(
-            {"items": {"*": {"id": "out[].id", "#item": "out[].type"}}},
+            {"items": {"*": {"id": "out[&1].id", "#item": "out[&1].type"}}},
             {"items": [{"id": 1}, {"id": 2}]},
         )
         for elem in result["out"]:
@@ -113,9 +113,9 @@ class TestDollarAndHashCombined:
         spec = {
             "sensors": {
                 "*": {
-                    "value": "readings[].value",
-                    "$0": "readings[].sensorId",
-                    "#sensor": "readings[].kind",
+                    "value": "readings[#2].value",
+                    "$0": "readings[#2].sensorId",
+                    "#sensor": "readings[#2].kind",
                 }
             }
         }
@@ -176,4 +176,4 @@ class TestExplicitArrayIndex:
         assert shift(spec, {"m": [[1, 2], [3, 4]]}) == {"grid": [[1, 2], [3, 4]]}
 
     def test_non_integer_index_is_skipped(self):
-        assert shift({"*": "out[&0]"}, {"foo": 1}) == {}
+        assert shift({"*": "out[&0]"}, {"foo": 1}) is None

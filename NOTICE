@@ -4,9 +4,11 @@ Copyright 2024 Sthitaprajna Sahoo and contributors
 This product includes software developed at the PyJolt project
 (https://github.com/sthitaprajnas/pyjolt).
 
-This software is a Python implementation inspired by the JOLT library
+This software is a Python implementation of the JOLT library
 (https://github.com/bazaarvoice/jolt), originally developed by Bazaarvoice, Inc.
-and licensed under the Apache License, Version 2.0.
+and licensed under the Apache License, Version 2.0. The transform engine in
+src/pyjolt/_common/ and src/pyjolt/transforms/ is adapted from the JOLT source
+code.
 
 The conformance test fixtures in tests/conformance/fixtures/ are copied from
 the JOLT project (https://github.com/bazaarvoice/jolt), Copyright Bazaarvoice,

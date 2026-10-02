@@ -12,100 +12,216 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Cardinality transform — enforce ONE or MANY cardinality on fields.
+"""Cardinality transform — force values to be a single item or a list.
 
-Spec values
------------
-* ``"ONE"``  — if the value is a list, take the **first** element; otherwise
-  keep as-is.
-* ``"MANY"`` — if the value is *not* a list, wrap it in a single-element list;
-  otherwise keep as-is.
+A port of the reference ``CardinalityTransform``. The spec mirrors the shape
+of the input; leaves are ``"ONE"`` or ``"MANY"``.
 
-Wildcards
----------
-``*`` as a spec key applies the cardinality rule to every key at that level.
+``"MANY"``
+    A non-list value is wrapped in a list; ``null`` becomes ``[]``.
+``"ONE"``
+    A list is replaced by its first element (``null`` if empty).
+
+Keys are literals, ``*`` wildcards, or ``"@"`` to apply to the containing
+value itself.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from .._common.paths import (
+    AmpPathElement,
+    AtPathElement,
+    LiteralPathElement,
+    MatchedElement,
+    PathElement,
+    StarAllPathElement,
+    StarRegexPathElement,
+    StarSinglePathElement,
+    WalkedPath,
+)
+from .._common.spec import computed_sort_key
+from .._common.util import count_matches, deep_copy, java_str
 from ..exceptions import SpecError
 from .base import Transform
 
-_ONE = "ONE"
-_MANY = "MANY"
+_ORDER: dict[type, int] = {
+    AmpPathElement: 1,
+    StarAllPathElement: 2,
+    StarSinglePathElement: 2,
+    StarRegexPathElement: 2,
+}
 
 
-def _adjust(val: Any, mode: str) -> Any:
-    upper = mode.upper()
-    if upper == _ONE:
-        if isinstance(val, list):
-            return val[0] if val else None
-        return val
-    if upper == _MANY:
-        if not isinstance(val, list):
-            return [val]
-        return val
-    raise SpecError(f"Unknown cardinality mode {mode!r}. Expected 'ONE' or 'MANY'.")
+def _parse(key: str) -> PathElement:
+    if "@" in key:
+        return AtPathElement(key)
+    if key == "*":
+        return StarAllPathElement(key)
+    if "*" in key:
+        if count_matches(key, "*") == 1:
+            return StarSinglePathElement(key)
+        return StarRegexPathElement(key)
+    return LiteralPathElement(key)
 
 
-def _apply_cardinality(data: Any, spec: Any) -> Any:
-    if isinstance(spec, str):
-        return _adjust(data, spec)
+def _put(container: Any, key: str, value: Any) -> None:
+    if isinstance(container, dict):
+        container[key] = value
+    elif isinstance(container, list):
+        container[int(key)] = value
 
-    if not isinstance(spec, dict):
-        raise SpecError(f"Cardinality spec must be a dict or string, got {type(spec).__name__!r}")
 
-    if isinstance(data, dict):
-        result: dict[str, Any] = dict(data)
-        wildcard = spec.get("*")
+class _LeafSpec:
+    __slots__ = ("path_element", "many")
 
-        for key, mode_or_sub in spec.items():
-            if key == "*":
-                continue
-            if key not in result:
-                continue
-            result[key] = _apply_cardinality(result[key], mode_or_sub)
+    def __init__(self, key: str, rhs: Any) -> None:
+        self.path_element = _parse(key)
+        value = java_str(rhs)
+        if value not in ("ONE", "MANY"):
+            raise SpecError(f"Invalid Cardinality type :{value}")
+        self.many = value == "MANY"
 
-        if wildcard is not None:
-            for key in result:
-                if key not in spec:
-                    result[key] = _apply_cardinality(result[key], wildcard)
+    def apply_cardinality(
+        self, input_key: str, value: Any, walked_path: WalkedPath, parent: Any
+    ) -> bool:
+        this_level = self.path_element.match(input_key, walked_path)
+        if this_level is None:
+            return False
+        self._adjust(input_key, value, walked_path, parent, this_level)
+        return True
 
+    def apply_to_parent_container(
+        self, input_key: str, value: Any, walked_path: WalkedPath, parent: Any
+    ) -> Any:
+        this_level = self.path_element.match(input_key, walked_path)
+        if this_level is None:
+            return None
+        return self._adjust(input_key, value, walked_path, parent, this_level)
+
+    def _adjust(
+        self,
+        input_key: str,
+        value: Any,
+        walked_path: WalkedPath,
+        parent: Any,
+        this_level: MatchedElement,
+    ) -> Any:
+        if not isinstance(parent, (dict, list)):
+            return None
+        result: Any = None
+        if self.many:
+            if isinstance(value, list):
+                result = value
+            elif value is None:
+                result = []
+            else:
+                result = [value]
+            _put(parent, input_key, result)
+        elif isinstance(value, list):
+            result = value[0] if value else None
+            _put(parent, input_key, result)
         return result
 
-    if isinstance(data, list):
-        wildcard = spec.get("*")
-        if wildcard is not None:
-            return [_apply_cardinality(item, wildcard) for item in data]
-        return data
 
-    return data
+class _CompositeSpec:
+    __slots__ = ("path_element", "special_child", "literal_children", "computed_children")
+
+    def __init__(self, key: str, spec: dict[str, Any]) -> None:
+        self.path_element = _parse(key)
+        if isinstance(self.path_element, AtPathElement):
+            raise SpecError("@ CardinalityTransform key, can not have children.")
+        children: list[_LeafSpec | _CompositeSpec] = []
+        seen: set[str] = set()
+        for k, rhs in spec.items():
+            child: _LeafSpec | _CompositeSpec = (
+                _CompositeSpec(k, rhs) if isinstance(rhs, dict) else _LeafSpec(k, rhs)
+            )
+            canonical = child.path_element.canonical_form
+            if canonical in seen:
+                raise SpecError(f"Duplicate canonical CardinalityTransform key found : {canonical}")
+            seen.add(canonical)
+            children.append(child)
+        if not children:
+            raise SpecError(
+                "CardinalitySpec format error : CardinalitySpec line with empty {} as value is "
+                "not valid."
+            )
+        self.special_child: _LeafSpec | None = None
+        self.literal_children: dict[str, _LeafSpec | _CompositeSpec] = {}
+        computed = []
+        for child in children:
+            # The reference registers every child by its raw key, so even a "*" child
+            # matches a data key that is literally "*".
+            self.literal_children[child.path_element.raw_key] = child
+            if isinstance(child.path_element, LiteralPathElement):
+                continue
+            if isinstance(child.path_element, AtPathElement):
+                if not isinstance(child, _LeafSpec):
+                    raise SpecError("@ CardinalityTransform key, can not have children.")
+                self.special_child = child
+            else:
+                computed.append(child)
+        computed.sort(key=computed_sort_key(_ORDER))
+        self.computed_children = computed
+
+    def apply_cardinality(
+        self, input_key: str, value: Any, walked_path: WalkedPath, parent: Any
+    ) -> bool:
+        this_level = self.path_element.match(input_key, walked_path)
+        if this_level is None:
+            return False
+        walked_path.add(value, this_level)
+        if self.special_child is not None:
+            value = self.special_child.apply_to_parent_container(
+                input_key, value, walked_path, parent
+            )
+        self._process(value, walked_path)
+        walked_path.remove_last()
+        return True
+
+    def _process(self, value: Any, walked_path: WalkedPath) -> None:
+        if isinstance(value, dict):
+            for key, sub in list(value.items()):
+                self._apply_key(key, sub, walked_path, value)
+        elif isinstance(value, list):
+            for i in range(len(value)):
+                self._apply_key(str(i), value[i], walked_path, value)
+        elif value is not None:
+            scalar = java_str(value)
+            self._apply_key(scalar, None, walked_path, scalar)
+
+    def _apply_key(self, key: str, sub: Any, walked_path: WalkedPath, parent: Any) -> None:
+        literal = self.literal_children.get(key)
+        if literal is not None:
+            literal.apply_cardinality(key, sub, walked_path, parent)
+            return
+        for child in self.computed_children:
+            if child.apply_cardinality(key, sub, walked_path, parent):
+                break
 
 
 class Cardinality(Transform):
-    """Adjust the cardinality of JSON values to ONE or MANY.
+    """Force values to be a single item (``"ONE"``) or a list (``"MANY"``).
 
-    Parameters
-    ----------
-    spec:
-        A dict mapping field names to ``"ONE"`` or ``"MANY"``.  Nested dicts
-        trigger recursive cardinality adjustment.
+    Example::
 
-    Examples
-    --------
-    >>> c = Cardinality({"tags": "MANY", "primary": "ONE"})
-    >>> c.apply({"tags": "python", "primary": ["first", "second"]})
-    {'tags': ['python'], 'primary': 'first'}
+        Cardinality({"tags": "MANY", "photo": "ONE"}).apply(
+            {"tags": "a", "photo": ["p1.jpg", "p2.jpg"]}
+        )  # -> {"tags": ["a"], "photo": "p1.jpg"}
     """
 
-    __slots__ = ("_spec",)
+    __slots__ = ("_root",)
 
     def __init__(self, spec: dict[str, Any]) -> None:
         if not isinstance(spec, dict):
-            raise SpecError(f"Cardinality spec must be a dict, got {type(spec).__name__!r}")
-        self._spec = spec
+            raise SpecError(f"Cardinality expected a spec of Map type, got {type(spec).__name__}")
+        self._root = _CompositeSpec("root", spec)
 
     def apply(self, input_data: Any) -> Any:
-        return _apply_cardinality(input_data, self._spec)
+        return self._apply_owned(deep_copy(input_data))
+
+    def _apply_owned(self, data: Any, context: dict[str, Any] | None = None) -> Any:
+        self._root.apply_cardinality("root", data, WalkedPath(), None)
+        return data

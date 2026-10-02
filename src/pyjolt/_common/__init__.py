@@ -12,24 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""All built-in transforms."""
+"""Internal machinery shared by the transforms.
 
-from .base import Transform
-from .cardinality import Cardinality
-from .default import Default
-from .modify import ModifyDefault, ModifyDefine, ModifyOverwrite
-from .remove import Remove
-from .shift import Shift
-from .sort import Sort
-
-__all__ = [
-    "Transform",
-    "Shift",
-    "Default",
-    "Remove",
-    "Sort",
-    "Cardinality",
-    "ModifyOverwrite",
-    "ModifyDefault",
-    "ModifyDefine",
-]
+This package follows the structure of the reference Java implementation
+(``com.bazaarvoice.jolt.common``) closely so that pyjolt matches its
+behaviour, including edge cases.
+"""
