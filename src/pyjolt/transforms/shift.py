@@ -59,7 +59,14 @@ class _ArrayAppend:
     __slots__ = ()
 
 
-_Part = _Literal | _Amp | _At | _HashLiteral | _ArrayAppend
+class _ArrayIndex:
+    __slots__ = ("parts",)
+
+    def __init__(self, parts: list[_Literal | _Amp | _At | _HashLiteral]) -> None:
+        self.parts = parts
+
+
+_Part = _Literal | _Amp | _At | _HashLiteral | _ArrayAppend | _ArrayIndex
 _Segment = list[_Part]
 
 # ---------------------------------------------------------------------------
@@ -72,6 +79,7 @@ _RE_AMP_BARE = re.compile(r"&(?!\()")
 _RE_AT_NP = re.compile(r"@\((\d+),([\w.]+)\)")
 _RE_HASH = re.compile(r"^#(.*)$")
 _RE_TOKENS = re.compile(r"(&\(\d+,\d+\)|&\d+|&|@\(\d+,[\w.]+\)|#[^.]*)")
+_RE_INDEX = re.compile(r"^(.*)\[([^\[\]]+)\]$")
 
 # ---------------------------------------------------------------------------
 # Parsing
@@ -92,13 +100,23 @@ def _parse_part(tok: str) -> _Part:
     return _Literal(tok)
 
 
+def _parse_tokens(raw: str) -> list[_Part]:
+    return [_parse_part(p) for p in _RE_TOKENS.split(raw) if p]
+
+
 def _parse_segment(raw: str) -> _Segment:
     append = raw.endswith("[]")
     if append:
         raw = raw[:-2]
     if not raw and append:
         return [_ArrayAppend()]
-    parts = [_parse_part(p) for p in _RE_TOKENS.split(raw) if p]
+    # Explicit array indices, e.g. "items[&2]", "[&1]", "list[0]" or "grid[&1][&0]"
+    indices: list[_Part] = []
+    while not append and (m := _RE_INDEX.match(raw)):
+        idx_parts: Any = _parse_tokens(m.group(2))
+        indices.insert(0, _ArrayIndex(idx_parts))
+        raw = m.group(1)
+    parts = _parse_tokens(raw) + indices
     if append:
         parts.append(_ArrayAppend())
     return parts
@@ -223,28 +241,41 @@ def _resolve_at(at: _At, ctx: list[_Ctx], val: Any) -> Any:
     return v
 
 
+def _resolve_part(p: _Part, ctx: list[_Ctx], val: Any) -> str:
+    if isinstance(p, (_Literal, _HashLiteral)):
+        return p.value
+    if isinstance(p, _Amp):
+        return _resolve_amp(p, ctx)
+    if isinstance(p, _At):
+        v = _resolve_at(p, ctx, val)
+        return "" if v is None else str(v)
+    return ""
+
+
+_Key = str | int
+
+
 def _resolve_path(
     segments: list[_Segment], ctx: list[_Ctx], val: Any
-) -> tuple[list[str], list[str], bool]:
-    keys = []
+) -> tuple[list[_Key], list[_Key], bool] | None:
+    keys: list[_Key] = []
     slot_after = None
     for seg in segments:
-        parts, is_array = [], False
+        parts, is_array, indices = [], False, []
         for p in seg:
-            if isinstance(p, _Literal):
-                parts.append(p.value)
-            elif isinstance(p, _Amp):
-                parts.append(_resolve_amp(p, ctx))
-            elif isinstance(p, _At):
-                v = _resolve_at(p, ctx, val)
-                parts.append("" if v is None else str(v))
-            elif isinstance(p, _HashLiteral):
-                parts.append(p.value)
-            elif isinstance(p, _ArrayAppend):
+            if isinstance(p, _ArrayAppend):
                 is_array = True
+            elif isinstance(p, _ArrayIndex):
+                raw_idx = "".join(_resolve_part(ip, ctx, val) for ip in p.parts)
+                if not raw_idx.isdigit():
+                    return None
+                indices.append(int(raw_idx))
+            else:
+                parts.append(_resolve_part(p, ctx, val))
         k = "".join(parts)
-        if k or not is_array:
+        if k or not (is_array or indices):
             keys.append(k)
+        keys.extend(indices)
         if is_array and slot_after is None:
             slot_after = len(keys)
     if slot_after is None:
@@ -252,58 +283,71 @@ def _resolve_path(
     return keys[:slot_after], keys[slot_after:], True
 
 
+def _get(node: Any, k: _Key) -> Any:
+    if isinstance(k, int):
+        return node[k] if k < len(node) else None
+    return node.get(k)
+
+
+def _set(node: Any, k: _Key, v: Any) -> None:
+    if isinstance(k, int):
+        while len(node) <= k:
+            node.append(None)
+    node[k] = v
+
+
+def _descend(node: Any, k: _Key, want_list: bool) -> Any:
+    child = _get(node, k)
+    if not isinstance(child, list if want_list else dict):
+        child = [] if want_list else {}
+        _set(node, k, child)
+    return child
+
+
+def _place(node: Any, k: _Key, val: Any) -> None:
+    cur = _get(node, k)
+    if cur is None and (isinstance(k, int) or k not in node):
+        _set(node, k, val)
+    elif isinstance(cur, list):
+        cur.append(val)
+    else:
+        _set(node, k, [cur, val])
+
+
 def _write(
     out: dict[str, Any],
-    pre: list[str],
-    post: list[str],
+    pre: list[_Key],
+    post: list[_Key],
     val: Any,
     append: bool,
-    slots: dict[tuple[int, tuple[str, ...]], dict[str, Any]],
+    slots: dict[tuple[int, tuple[str, ...]], Any],
     ctx: list[_Ctx],
 ) -> None:
+    if isinstance(pre[0], int):
+        return  # the root output is always an object
     node: Any = out
-    for k in pre[:-1]:
-        if not isinstance(node.get(k), (dict, list)):
-            node[k] = {}
-        node = node[k]
+    for i, k in enumerate(pre[:-1]):
+        node = _descend(node, k, isinstance(pre[i + 1], int))
 
     ak = pre[-1]
     if not append:
-        if isinstance(node, dict):
-            if ak in node:
-                if isinstance(node[ak], list):
-                    node[ak].append(val)
-                else:
-                    node[ak] = [node[ak], val]
-            else:
-                node[ak] = val
+        _place(node, ak, val)
         return
 
-    if not isinstance(node.get(ak), list):
-        node[ak] = []
-    arr = node[ak]
+    arr = _descend(node, ak, True)
     if not post:
         arr.append(val)
         return
 
     rk = (id(arr), tuple(c.key for c in ctx[:-1]))
     if rk not in slots:
-        slot: dict[str, Any] = {}
+        slot: Any = [] if isinstance(post[0], int) else {}
         arr.append(slot)
         slots[rk] = slot
     inner = slots[rk]
-    for k in post[:-1]:
-        if not isinstance(inner.get(k), dict):
-            inner[k] = {}
-        inner = inner[k]
-    lk = post[-1]
-    if lk in inner:
-        if isinstance(inner[lk], list):
-            inner[lk].append(val)
-        else:
-            inner[lk] = [inner[lk], val]
-    else:
-        inner[lk] = val
+    for i, k in enumerate(post[:-1]):
+        inner = _descend(inner, k, isinstance(post[i + 1], int))
+    _place(inner, post[-1], val)
 
 
 # ---------------------------------------------------------------------------
@@ -316,11 +360,14 @@ def _apply(
     spec: _SpecLeaf | _SpecNode,
     ctx: list[_Ctx],
     out: dict[str, Any],
-    slots: dict[tuple[int, tuple[str, ...]], dict[str, Any]],
+    slots: dict[tuple[int, tuple[str, ...]], Any],
 ) -> None:
     if isinstance(spec, _SpecLeaf):
         for path_list in spec.paths:
-            pre, post, append = _resolve_path(path_list, ctx, val)
+            resolved = _resolve_path(path_list, ctx, val)
+            if resolved is None:
+                continue
+            pre, post, append = resolved
             if pre:
                 _write(out, pre, post, val, append, slots, ctx)
         return
