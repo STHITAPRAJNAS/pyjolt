@@ -7,3 +7,7 @@ This product includes software developed at the PyJolt project
 This software is a Python implementation inspired by the JOLT library
 (https://github.com/bazaarvoice/jolt), originally developed by Bazaarvoice, Inc.
 and licensed under the Apache License, Version 2.0.
+
+The conformance test fixtures in tests/conformance/fixtures/ are copied from
+the JOLT project (https://github.com/bazaarvoice/jolt), Copyright Bazaarvoice,
+Inc., and are licensed under the Apache License, Version 2.0.

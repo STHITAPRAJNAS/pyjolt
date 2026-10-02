@@ -25,6 +25,27 @@ pytest --cov=pyjolt --cov-report=term-missing
 pytest tests/test_shift.py -v
 ```
 
+### Conformance with reference JOLT
+
+`tests/conformance/` runs the reference Java JOLT test fixtures
+(from [bazaarvoice/jolt](https://github.com/bazaarvoice/jolt)) against pyjolt,
+so behaviour stays identical to the Java library and the
+[JOLT demo site](https://jolt-demo.appspot.com).
+
+```bash
+pytest tests/conformance -q
+```
+
+Cases pyjolt does not pass yet are listed in
+`tests/conformance/known_failures.txt` and run as strict xfails:
+
+- **Fixing a known failure:** the case starts passing, so the suite fails with
+  `XPASS(strict)`. Delete its line from `known_failures.txt`.
+- **Never add new entries** to make a change pass. A case that used to pass and
+  now fails is a regression.
+- **Fixing a bug report:** add the reporter's spec, input and expected output
+  (from the JOLT demo site) as a regression test.
+
 ## Code quality
 
 ```bash
