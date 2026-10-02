@@ -128,3 +128,52 @@ class TestDollarAndHashCombined:
         for r in readings:
             assert r["kind"] == "sensor"
             assert "value" in r
+
+
+class TestExplicitArrayIndex:
+    """Output paths with an explicit array index, e.g. ``items.[&2]`` or ``items[&1]``."""
+
+    def test_issue_8_dot_bracket_backref(self):
+        spec = {
+            "items": {
+                "*": {
+                    "snippet": {
+                        "title": "items.[&2].&",
+                        "channelId": "items.[&2].&",
+                        "resourceId": {"videoId": "items.[&3].&"},
+                    }
+                }
+            }
+        }
+        data = {
+            "kind": "list",
+            "items": [
+                {"snippet": {"title": "A", "channelId": "c1", "resourceId": {"videoId": "v1"}}},
+                {"snippet": {"title": "B", "channelId": "c2", "resourceId": {"videoId": "v2"}}},
+            ],
+        }
+        assert shift(spec, data) == {
+            "items": [
+                {"title": "A", "channelId": "c1", "videoId": "v1"},
+                {"title": "B", "channelId": "c2", "videoId": "v2"},
+            ]
+        }
+
+    def test_bracket_attached_to_key(self):
+        spec = {"rows": {"*": {"id": "out[&1].key", "name": "out[&1].label"}}}
+        data = {"rows": [{"id": 1, "name": "x"}, {"id": 2, "name": "y"}]}
+        assert shift(spec, data) == {"out": [{"key": 1, "label": "x"}, {"key": 2, "label": "y"}]}
+
+    def test_literal_index_pads_with_none(self):
+        assert shift({"a": "arr[2]"}, {"a": 5}) == {"arr": [None, None, 5]}
+
+    def test_index_as_leaf(self):
+        spec = {"*": {"v": "vals[&1]"}}
+        assert shift(spec, [{"v": "a"}, {"v": "b"}]) == {"vals": ["a", "b"]}
+
+    def test_nested_indices(self):
+        spec = {"m": {"*": {"*": "grid[&1][&0]"}}}
+        assert shift(spec, {"m": [[1, 2], [3, 4]]}) == {"grid": [[1, 2], [3, 4]]}
+
+    def test_non_integer_index_is_skipped(self):
+        assert shift({"*": "out[&0]"}, {"foo": 1}) == {}

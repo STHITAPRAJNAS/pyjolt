@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] — 2026-10-02
+
+### Fixed
+
+- **Shift Transform**: Output paths now support explicit array indices such as
+  `items.[&2].field`, `items[&1].field`, `list[0]` and `grid[&1][&0]`.
+  Previously the bracketed index was written as a literal object key
+  (e.g. `"[0]"`) instead of building an array
+  ([#8](https://github.com/sthitaprajnas/pyjolt/issues/8)).
+
 ## [1.2.1] — 2026-04-10
 
 ### Fixed
@@ -87,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 193 tests across all transforms and real-world integration scenarios
 
+[1.2.2]: https://github.com/sthitaprajnas/pyjolt/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/sthitaprajnas/pyjolt/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/sthitaprajnas/pyjolt/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/sthitaprajnas/pyjolt/compare/v1.0.0...v1.1.0
